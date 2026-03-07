@@ -207,6 +207,38 @@ function MonthCalendar({appointments:ap,t,onEdit,onDelete}){
 /* ─── Exilir Banner ─── */
 function ExilirBanner({t}){return(<div style={{background:t.card,borderRadius:16,padding:"16px 20px",marginBottom:20,boxShadow:t.shadow,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:11,fontWeight:600,color:t.textFaint,textTransform:"uppercase",letterSpacing:"0.05em"}}>Free tool by</span><a href="https://exilir.net" target="_blank" rel="noopener noreferrer" style={{fontSize:16,fontWeight:700,color:"#3b82f6",textDecoration:"none",fontFamily:"'DM Sans',sans-serif"}}>Exilir LLC</a></div><a href="https://exilir.net/classify" target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",fontSize:13,fontWeight:600,color:"#fff",background:"linear-gradient(135deg,#3b82f6,#8b5cf6)",borderRadius:10,textDecoration:"none",fontFamily:"'DM Sans',sans-serif"}}>Try Exilir Classify <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a></div>);}
 
+/* ─── Feedback Section ─── */
+function FeedbackSection({user,t}){
+  var[msg,setMsg]=useState(""),[sent,setSent]=useState(false),[feedbacks,setFeedbacks]=useState([]),[loading,setLoading]=useState(true);
+  useEffect(()=>{if(!window.firebaseReady)return;var unsub=window.fbDb.collection("feedback").orderBy("createdAt","desc").limit(10).onSnapshot(snap=>{var items=[];snap.forEach(doc=>{var d=doc.data();items.push({id:doc.id,...d});});setFeedbacks(items);setLoading(false);},err=>{console.error("Feedback load error:",err);setLoading(false);});return()=>unsub();},[]);
+  var submit=async()=>{if(!msg.trim()||!user||!window.firebaseReady)return;try{await window.fbDb.collection("feedback").add({message:msg.trim(),userName:user.displayName||"Anonymous",userPhoto:user.photoURL||"",createdAt:firebase.firestore.FieldValue.serverTimestamp()});setMsg("");setSent(true);setTimeout(()=>setSent(false),3000);}catch(e){console.error("Feedback error:",e);}};
+  var timeAgo=ts=>{if(!ts)return"just now";var s=Math.floor((Date.now()-ts.toDate().getTime())/1000);if(s<60)return"just now";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago";};
+  return(<div style={{background:t.card,borderRadius:16,padding:20,marginTop:24,boxShadow:t.shadow}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span style={{fontSize:14,fontWeight:700,color:t.text}}>Feedback & Feature Requests</span>
+    </div>
+    <p style={{fontSize:13,color:t.textMuted,marginBottom:14}}>Enjoying this calendar? Tell us what features you'd like to see next!</p>
+    {user?(<div>
+      <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="I'd love to see..." style={{width:"100%",padding:"10px 14px",fontSize:14,fontFamily:"'DM Sans',sans-serif",border:"2px solid "+t.inputBorder,borderRadius:10,outline:"none",color:t.textSec,background:t.inputBg,resize:"vertical",minHeight:60}} rows={2}/>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:8}}>
+        {sent&&<span style={{fontSize:13,color:"#10b981",fontWeight:500,alignSelf:"center"}}>Thanks for your feedback!</span>}
+        <button onClick={submit} disabled={!msg.trim()} style={{padding:"8px 20px",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",background:msg.trim()?"#3b82f6":"#94a3b8",color:"#fff",border:"none",borderRadius:8,cursor:msg.trim()?"pointer":"default",opacity:msg.trim()?1:0.6}}>Submit</button>
+      </div>
+    </div>):(<div style={{background:t.cardAlt,borderRadius:10,padding:"12px 16px",fontSize:13,color:t.textFaint,textAlign:"center"}}>Sign in with Google to leave feedback</div>)}
+    {feedbacks.length>0&&<div style={{marginTop:20,borderTop:"1px solid "+t.borderLight,paddingTop:14}}>
+      <div style={{fontSize:12,fontWeight:600,color:t.textFaint,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>Recent feedback</div>
+      {feedbacks.map(f=><div key={f.id} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:"1px solid "+t.borderLight}}>
+        <img src={f.userPhoto||""} alt="" style={{width:24,height:24,borderRadius:"50%",marginTop:2,flexShrink:0}} referrerPolicy="no-referrer"/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:12,fontWeight:600,color:t.textSec}}>{f.userName}</span><span style={{fontSize:10,color:t.textFaint}}>{timeAgo(f.createdAt)}</span></div>
+          <p style={{fontSize:13,color:t.textMuted,marginTop:2,lineHeight:1.4}}>{f.message}</p>
+        </div>
+      </div>)}
+    </div>}
+  </div>);
+}
+
 /* ─── Main App ─── */
 function CalendarApp(){
   var[dark,setDark]=useState(false),t=dark?TH.dark:TH.light;
@@ -309,6 +341,7 @@ function CalendarApp(){
         {filtered.length>3&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 20px",borderTop:"1px solid "+t.borderLight}}><span style={{fontSize:13,color:t.textFaint,fontWeight:500}}>{(filtered.length-3)+" more appointment"+(filtered.length-3!==1?"s":"")}</span><button onClick={exportCSV} style={{fontSize:13,fontWeight:600,color:"#3b82f6",background:"none",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>{"\u2192 Download CSV for full list"}</button></div>}
       </div>):appointments.length>0?(<div style={{background:t.card,borderRadius:16,padding:"48px 20px",textAlign:"center",boxShadow:t.shadow}}><p style={{fontSize:16,fontWeight:600,color:t.textFaint,marginTop:16}}>No matching appointments</p><p style={{fontSize:14,color:t.textGhost,marginTop:6}}>Try a different search or filter</p></div>):(<div style={{background:t.card,borderRadius:16,padding:"48px 20px",textAlign:"center",boxShadow:t.shadow}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={t.textGhost} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="10" y1="14" x2="14" y2="14"/></svg><p style={{fontSize:16,fontWeight:600,color:t.textFaint,marginTop:16}}>No appointments yet</p><p style={{fontSize:14,color:t.textGhost,marginTop:6}}>Add one above to get started</p></div>)}
       <AppointmentChart key={appointments.map(a=>a.id).join("-")} appointments={appointments} t={t}/>
+      <FeedbackSection user={user} t={t}/>
       {/* Footer */}
       <div style={{textAlign:"center",padding:"32px 0 16px",fontSize:12,color:t.textFaint}}>
         <span>{user?"Your appointments sync securely via your Google account.":"Sign in with Google to sync across all your devices."}</span>
@@ -322,4 +355,5 @@ ReactDOM.createRoot(document.getElementById("root")).render(<CalendarApp/>);
   </script>
 </body>
 </html>
+
 
