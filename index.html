@@ -4,8 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Exilir Calendar — Free Scheduling Tool</title>
-  <meta name="description" content="A free, private calendar and appointment scheduler by Exilir LLC. Your data stays on your device." />
+  <meta name="description" content="A free calendar and appointment scheduler by Exilir LLC. Sign in with Google to sync across devices." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><rect x='3' y='4' width='18' height='18' rx='2'/><line x1='16' y1='2' x2='16' y2='6'/><line x1='8' y1='2' x2='8' y2='6'/><line x1='3' y1='10' x2='21' y2='10'/></svg>" />
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
@@ -13,805 +16,310 @@
     @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
     * { box-sizing: border-box; margin: 0; padding: 0; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
     select { -webkit-appearance: none; appearance: none; }
     html, body, #root { min-height: 100vh; }
   </style>
 </head>
 <body>
   <div id="root"></div>
+  <!-- Firebase init (runs before React) -->
+  <script>
+    var firebaseConfig = {
+      apiKey: "AIzaSyBARB8WptHw_LOcMppNEaStFuxFXr1eyIY",
+      authDomain: "exilir-calendar.firebaseapp.com",
+      projectId: "exilir-calendar",
+      storageBucket: "exilir-calendar.firebasestorage.app",
+      messagingSenderId: "950482229760",
+      appId: "1:950482229760:web:0ff12b7f1ea9f1920d56e5"
+    };
+    window.firebaseReady = false;
+    try {
+      if (firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_API_KEY") {
+        firebase.initializeApp(firebaseConfig);
+        window.fbAuth = firebase.auth();
+        window.fbDb = firebase.firestore();
+        window.fbGoogleProvider = new firebase.auth.GoogleAuthProvider();
+        window.firebaseReady = true;
+      }
+    } catch (e) { console.error("Firebase init error:", e); }
+  </script>
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useCallback } = React;
 
-    const MONTHS = {
-      jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
-      apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
-      aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9,
-      nov: 10, november: 10, dec: 11, december: 11
-    };
+const MONTHS = { jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11 };
+const CATEGORIES = [
+  { key:"personal", label:"Personal", color:"#3b82f6" },
+  { key:"work", label:"Work", color:"#8b5cf6" },
+  { key:"medical", label:"Medical", color:"#ef4444" },
+  { key:"social", label:"Social", color:"#f59e0b" },
+  { key:"other", label:"Other", color:"#64748b" },
+];
+const REMINDERS = [
+  { key:"none", label:"No reminder" },{ key:"15m", label:"15 min before" },
+  { key:"30m", label:"30 min before" },{ key:"1h", label:"1 hour before" },{ key:"1d", label:"1 day before" },
+];
+const TH = {
+  light: { bg:"linear-gradient(135deg,#f0f4ff 0%,#e8edf5 50%,#f5f0ff 100%)", card:"#fff",cardAlt:"#f8fafc",border:"#e2e8f0",borderLight:"#f1f5f9", text:"#1e293b",textSec:"#334155",textMuted:"#64748b",textFaint:"#94a3b8",textGhost:"#cbd5e1", inputBg:"#f8fafc",inputBorder:"#e2e8f0",editBg:"#f0f7ff", iconBg:"#e8f0fe",badgeBg:"#eff6ff",toggleBg:"#f1f5f9", shadow:"0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04)", searchBg:"#fff",thBg:"#f8fafc", chartBg:"#1a2332",chartText:"#e2e8f0",chartMuted:"#8899aa",chartDim:"#667788",chartGrid:"#4a5568", calCellDay:"#334155", conflictBg:"#fef3c7",conflictBorder:"#fbbf24",conflictText:"#92400e", icsBtn:"#f5f3ff",csvBtn:"#ecfdf5" },
+  dark: { bg:"linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", card:"#1e293b",cardAlt:"#273548",border:"#334155",borderLight:"#2d3a4a", text:"#f1f5f9",textSec:"#e2e8f0",textMuted:"#94a3b8",textFaint:"#64748b",textGhost:"#475569", inputBg:"#273548",inputBorder:"#475569",editBg:"#1e3a5f", iconBg:"#1e3a5f",badgeBg:"#1e3a5f",toggleBg:"#334155", shadow:"0 1px 3px rgba(0,0,0,0.3),0 4px 12px rgba(0,0,0,0.2)", searchBg:"#1e293b",thBg:"#273548", chartBg:"#0f172a",chartText:"#e2e8f0",chartMuted:"#8899aa",chartDim:"#667788",chartGrid:"#334155", calCellDay:"#e2e8f0", conflictBg:"#422006",conflictBorder:"#a16207",conflictText:"#fbbf24", icsBtn:"#2e1065",csvBtn:"#064e3b" },
+};
 
-    const CATEGORIES = [
-      { key: "personal", label: "Personal", color: "#3b82f6" },
-      { key: "work", label: "Work", color: "#8b5cf6" },
-      { key: "medical", label: "Medical", color: "#ef4444" },
-      { key: "social", label: "Social", color: "#f59e0b" },
-      { key: "other", label: "Other", color: "#64748b" },
-    ];
+function getCatColor(k){return CATEGORIES.find(c=>c.key===k)?.color||"#3b82f6";}
 
-    const REMINDERS = [
-      { key: "none", label: "No reminder" },
-      { key: "15m", label: "15 min before" },
-      { key: "30m", label: "30 min before" },
-      { key: "1h", label: "1 hour before" },
-      { key: "1d", label: "1 day before" },
-    ];
+function parseAppointment(text){
+  var o=text.trim();if(!o)return null;var dateObj=null,timeStr="",title=o;
+  var tr=/(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)\b|\b(\d{1,2}):(\d{2})\b/g,tm=tr.exec(o);
+  if(tm){var h,m;if(tm[4]!==undefined){h=parseInt(tm[4]);m=parseInt(tm[5]);}else{h=parseInt(tm[1]);m=tm[2]?parseInt(tm[2]):0;var ap=tm[3].toLowerCase();if(ap==="pm"&&h!==12)h+=12;if(ap==="am"&&h===12)h=0;}timeStr=String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");title=title.replace(tm[0],"").trim();}
+  var sd=/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/,dm=sd.exec(title);
+  if(dm){var y=parseInt(dm[3]);if(y<100)y+=2000;dateObj=new Date(y,parseInt(dm[1])-1,parseInt(dm[2]));title=title.replace(dm[0],"").trim();}
+  if(!dateObj){var mn=Object.keys(MONTHS).join("|"),nd=new RegExp("("+mn+")\\s+(\\d{1,2}),?\\s*(\\d{4})","i");dm=nd.exec(title);if(dm){dateObj=new Date(parseInt(dm[3]),MONTHS[dm[1].toLowerCase()],parseInt(dm[2]));title=title.replace(dm[0],"").trim();}}
+  if(!dateObj){var mn2=Object.keys(MONTHS).join("|"),nd2=new RegExp("(\\d{1,2})\\s+("+mn2+"),?\\s*(\\d{4})","i");dm=nd2.exec(title);if(dm){dateObj=new Date(parseInt(dm[3]),MONTHS[dm[2].toLowerCase()],parseInt(dm[1]));title=title.replace(dm[0],"").trim();}}
+  if(!dateObj){var lw=title.toLowerCase();if(lw.includes("today")){dateObj=new Date();title=title.replace(/today/i,"").trim();}else if(lw.includes("tomorrow")){dateObj=new Date();dateObj.setDate(dateObj.getDate()+1);title=title.replace(/tomorrow/i,"").trim();}}
+  title=title.replace(/\s+/g," ").replace(/^[\s,\-\u2013]+|[\s,\-\u2013]+$/g,"").trim();
+  if(!title)title="Appointment";title=title.charAt(0).toUpperCase()+title.slice(1);
+  var ds=dateObj?dateObj.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"}):"No date";
+  var dt=timeStr?new Date("2000-01-01T"+timeStr).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}):"No time";
+  var hr=timeStr?parseInt(timeStr.split(":")[0])+parseInt(timeStr.split(":")[1])/60:null;
+  var sk=dateObj?dateObj.getTime()+(timeStr?parseInt(timeStr.split(":")[0])*60+parseInt(timeStr.split(":")[1]):0):0;
+  return{id:Date.now()+Math.random(),title:title,date:ds,time:dt,dateObj:dateObj?dateObj.toISOString():null,timeHour:hr,sortKey:sk,raw:title};
+}
+function countdownLabel(d){if(!d)return"";var n=new Date();n.setHours(0,0,0,0);var x=new Date(d);x.setHours(0,0,0,0);var days=Math.ceil((x-n)/86400000);if(days===0)return"Today";if(days===1)return"Tomorrow";return days+" days away";}
+function checkConflict(nw,ex){if(!nw.dateObj||!nw.timeHour)return null;var nd=new Date(nw.dateObj).toDateString();for(var i=0;i<ex.length;i++){var a=ex[i];if(!a.dateObj||!a.timeHour)continue;if(new Date(a.dateObj).toDateString()===nd&&Math.abs(a.timeHour-nw.timeHour)<1)return a;}return null;}
+function generateICS(ap){var l=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//ExilirCalendar//EN"];ap.forEach(function(a){if(!a.dateObj)return;var d=new Date(a.dateObj),p=n=>String(n).padStart(2,"0"),ds=d.getFullYear()+""+p(d.getMonth()+1)+p(d.getDate()),s,e;if(a.timeHour!=null){var h=Math.floor(a.timeHour),m=Math.round((a.timeHour-h)*60);s=ds+"T"+p(h)+p(m)+"00";e=ds+"T"+p(h+1)+p(m)+"00";}else{s=ds;e=ds;}l.push("BEGIN:VEVENT","DTSTART:"+s,"DTEND:"+e,"SUMMARY:"+a.title);if(a.notes)l.push("DESCRIPTION:"+a.notes.replace(/\n/g," "));if(a.category)l.push("CATEGORIES:"+a.category);l.push("UID:"+a.id+"@exilircalendar","END:VEVENT");});l.push("END:VCALENDAR");return l.join("\r\n");}
 
-    const TH = {
-      light: {
-        bg: "linear-gradient(135deg, #f0f4ff 0%, #e8edf5 50%, #f5f0ff 100%)",
-        card: "#fff", cardAlt: "#f8fafc", border: "#e2e8f0", borderLight: "#f1f5f9",
-        text: "#1e293b", textSec: "#334155", textMuted: "#64748b", textFaint: "#94a3b8", textGhost: "#cbd5e1",
-        inputBg: "#f8fafc", inputBorder: "#e2e8f0", editBg: "#f0f7ff",
-        iconBg: "#e8f0fe", badgeBg: "#eff6ff", toggleBg: "#f1f5f9",
-        shadow: "0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)",
-        searchBg: "#fff", thBg: "#f8fafc",
-        chartBg: "#1a2332", chartText: "#e2e8f0", chartMuted: "#8899aa", chartDim: "#667788", chartGrid: "#4a5568",
-        calCellDay: "#334155",
-        conflictBg: "#fef3c7", conflictBorder: "#fbbf24", conflictText: "#92400e",
-        icsBtn: "#f5f3ff", csvBtn: "#ecfdf5",
-      },
-      dark: {
-        bg: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
-        card: "#1e293b", cardAlt: "#273548", border: "#334155", borderLight: "#2d3a4a",
-        text: "#f1f5f9", textSec: "#e2e8f0", textMuted: "#94a3b8", textFaint: "#64748b", textGhost: "#475569",
-        inputBg: "#273548", inputBorder: "#475569", editBg: "#1e3a5f",
-        iconBg: "#1e3a5f", badgeBg: "#1e3a5f", toggleBg: "#334155",
-        shadow: "0 1px 3px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.2)",
-        searchBg: "#1e293b", thBg: "#273548",
-        chartBg: "#0f172a", chartText: "#e2e8f0", chartMuted: "#8899aa", chartDim: "#667788", chartGrid: "#334155",
-        calCellDay: "#e2e8f0",
-        conflictBg: "#422006", conflictBorder: "#a16207", conflictText: "#fbbf24",
-        icsBtn: "#2e1065", csvBtn: "#064e3b",
-      },
-    };
+function generateSampleAppointments(){var n=new Date(),ad=(d,x)=>{var r=new Date(d);r.setDate(r.getDate()+x);return r;},mk=(id,t,df,h,m,c,nt,rm)=>{var d=ad(n,df);d.setHours(0,0,0,0);return{id,title:t,date:d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:"numeric"}),time:new Date(2000,0,1,h,m).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),dateObj:d.toISOString(),timeHour:h+m/60,sortKey:d.getTime()+h*60+m,raw:t,category:c,notes:nt,reminder:rm};};return[mk(1,"Dentist Checkup",2,10,0,"medical","Annual cleaning","1h"),mk(2,"Team Standup",3,9,30,"work","Weekly sync","15m"),mk(3,"Lunch with Alex",5,12,0,"social","","30m"),mk(4,"Project Deadline",7,17,0,"work","Submit final report","1d"),mk(5,"Yoga Class",1,7,0,"personal","Bring mat","30m")];}
+const SAMPLE_APPOINTMENTS=generateSampleAppointments();
 
-    function getCatColor(key) {
-      return CATEGORIES.find(function(c) { return c.key === key; })?.color || "#3b82f6";
-    }
+/* ─── Auth Bar ─── */
+function AuthBar({user,t,onSignIn,onSignOut,syncing}){
+  if(!window.firebaseReady)return(<div style={{background:t.conflictBg,border:"1px solid "+t.conflictBorder,borderRadius:12,padding:"12px 16px",marginBottom:20,fontSize:13,color:t.conflictText,fontWeight:500}}>{"\u26A0\uFE0F"} Firebase not configured. Sign-in disabled. See the setup guide to enable cloud sync.</div>);
+  if(user)return(
+    <div style={{background:t.card,borderRadius:12,padding:"10px 16px",marginBottom:20,boxShadow:t.shadow,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <img src={user.photoURL||""} alt="" style={{width:32,height:32,borderRadius:"50%",border:"2px solid "+t.borderLight}} referrerPolicy="no-referrer"/>
+        <div><div style={{fontSize:13,fontWeight:600,color:t.text}}>{user.displayName||"User"}</div>
+        <div style={{fontSize:11,color:t.textFaint,display:"flex",alignItems:"center",gap:4}}>{syncing?<span style={{animation:"pulse 1.5s infinite"}}>{"\uD83D\uDD04"} Syncing...</span>:<span>{"\u2601\uFE0F"} Synced across devices</span>}</div></div>
+      </div>
+      <button onClick={onSignOut} style={{fontSize:12,fontWeight:500,color:t.textFaint,background:t.toggleBg,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Sign out</button>
+    </div>);
+  return(
+    <div style={{background:t.card,borderRadius:12,padding:"14px 16px",marginBottom:20,boxShadow:t.shadow,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+      <div style={{fontSize:13,color:t.textMuted}}>{"\uD83D\uDD12"} Sign in to sync your calendar across all your devices</div>
+      <button onClick={onSignIn} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",fontSize:13,fontWeight:600,color:"#1e293b",background:"#fff",border:"1px solid #e2e8f0",borderRadius:8,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 1px 3px rgba(0,0,0,0.08)"}}>
+        <svg width="16" height="16" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+        Sign in with Google
+      </button>
+    </div>);
+}
 
-    function parseAppointment(text) {
-      var original = text.trim();
-      if (!original) return null;
-      var dateObj = null, timeStr = "", title = original;
-      var timeRegex = /(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)\b|\b(\d{1,2}):(\d{2})\b/g;
-      var timeMatch = timeRegex.exec(original);
-      if (timeMatch) {
-        var hours, minutes;
-        if (timeMatch[4] !== undefined) { hours = parseInt(timeMatch[4]); minutes = parseInt(timeMatch[5]); }
-        else {
-          hours = parseInt(timeMatch[1]); minutes = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
-          var ampm = timeMatch[3].toLowerCase();
-          if (ampm === "pm" && hours !== 12) hours += 12;
-          if (ampm === "am" && hours === 12) hours = 0;
-        }
-        timeStr = String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0");
-        title = title.replace(timeMatch[0], "").trim();
-      }
-      var slashDate = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
-      var dateMatch = slashDate.exec(title);
-      if (dateMatch) {
-        var year = parseInt(dateMatch[3]); if (year < 100) year += 2000;
-        dateObj = new Date(year, parseInt(dateMatch[1]) - 1, parseInt(dateMatch[2]));
-        title = title.replace(dateMatch[0], "").trim();
-      }
-      if (!dateObj) {
-        var mn = Object.keys(MONTHS).join("|");
-        var nd = new RegExp("(" + mn + ")\\s+(\\d{1,2}),?\\s*(\\d{4})", "i");
-        dateMatch = nd.exec(title);
-        if (dateMatch) { dateObj = new Date(parseInt(dateMatch[3]), MONTHS[dateMatch[1].toLowerCase()], parseInt(dateMatch[2])); title = title.replace(dateMatch[0], "").trim(); }
-      }
-      if (!dateObj) {
-        var mn2 = Object.keys(MONTHS).join("|");
-        var nd2 = new RegExp("(\\d{1,2})\\s+(" + mn2 + "),?\\s*(\\d{4})", "i");
-        dateMatch = nd2.exec(title);
-        if (dateMatch) { dateObj = new Date(parseInt(dateMatch[3]), MONTHS[dateMatch[2].toLowerCase()], parseInt(dateMatch[1])); title = title.replace(dateMatch[0], "").trim(); }
-      }
-      if (!dateObj) {
-        var lower = title.toLowerCase();
-        if (lower.includes("today")) { dateObj = new Date(); title = title.replace(/today/i, "").trim(); }
-        else if (lower.includes("tomorrow")) { dateObj = new Date(); dateObj.setDate(dateObj.getDate() + 1); title = title.replace(/tomorrow/i, "").trim(); }
-      }
-      title = title.replace(/\s+/g, " ").replace(/^[\s,\-\u2013]+|[\s,\-\u2013]+$/g, "").trim();
-      if (!title) title = "Appointment";
-      title = title.charAt(0).toUpperCase() + title.slice(1);
-      var dateString = dateObj ? dateObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "No date";
-      var displayTime = timeStr ? new Date("2000-01-01T" + timeStr).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "No time";
-      var hr = timeStr ? parseInt(timeStr.split(":")[0]) + parseInt(timeStr.split(":")[1]) / 60 : null;
-      var sk = dateObj ? dateObj.getTime() + (timeStr ? parseInt(timeStr.split(":")[0]) * 60 + parseInt(timeStr.split(":")[1]) : 0) : 0;
-      return { id: Date.now() + Math.random(), title: title, date: dateString, time: displayTime, dateObj: dateObj ? dateObj.toISOString() : null, timeHour: hr, sortKey: sk, raw: title };
-    }
+/* ─── Dark Mode Toggle ─── */
+function DarkModeToggle({dark,onToggle}){return(<button onClick={onToggle} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 20px",borderRadius:50,border:"2px solid "+(dark?"#475569":"#cbd5e1"),background:dark?"#334155":"#e2e8f0",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:600,color:dark?"#f1f5f9":"#334155",transition:"all 0.3s"}}><span style={{fontSize:20}}>{dark?"\u2600\uFE0F":"\uD83C\uDF19"}</span>{dark?"Light":"Dark"}</button>);}
 
-    function countdownLabel(dateObj) {
-      if (!dateObj) return "";
-      var now = new Date(); now.setHours(0,0,0,0);
-      var d = new Date(dateObj); d.setHours(0,0,0,0);
-      var days = Math.ceil((d - now) / 86400000);
-      if (days === 0) return "Today";
-      if (days === 1) return "Tomorrow";
-      return days + " days away";
-    }
+/* ─── Timeline ─── */
+function TimelineGraph({appointments:ap,t}){
+  var wd=ap.filter(a=>a.dateObj);if(wd.length===0)return null;
+  var now=new Date();now.setHours(0,0,0,0);
+  var up=wd.filter(a=>new Date(a.dateObj)>=now).sort((a,b)=>new Date(a.dateObj)-new Date(b.dateObj)).slice(0,3);
+  var sorted=up.length>0?up:wd.sort((a,b)=>new Date(b.dateObj)-new Date(a.dateObj)).slice(0,3);
+  var groups={};sorted.forEach(a=>{var d=new Date(a.dateObj),k=d.getFullYear()+"-"+String(d.getMonth()).padStart(2,"0"),lb=d.toLocaleDateString("en-US",{month:"long",year:"numeric"});if(!groups[k])groups[k]={label:lb,items:[]};groups[k].items.push(a);});
+  return(<div style={{background:t.card,borderRadius:16,boxShadow:t.shadow,padding:20,marginBottom:24}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:20}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span style={{fontSize:14,fontWeight:700,color:t.text}}>Timeline</span><span style={{fontSize:12,color:t.textFaint}}>{"\u2014"} 3 upcoming</span></div>
+    {Object.keys(groups).sort().map(mk=>{var g=groups[mk];return(<div key={mk} style={{marginBottom:24}}><div style={{fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",color:t.textFaint,marginBottom:10}}>{g.label}</div><div style={{display:"flex",gap:10,flexWrap:"wrap"}}>{g.items.map(a=>{var d=new Date(a.dateObj),cl=getCatColor(a.category),cd=countdownLabel(a.dateObj);return(<div key={a.id} style={{flex:"1 1 160px",minWidth:150,background:t.cardAlt,borderRadius:10,padding:"12px 14px",display:"flex",alignItems:"center",gap:12,borderLeft:"4px solid "+cl}}><div style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:36}}><span style={{fontSize:22,fontWeight:700,lineHeight:1,color:cl}}>{d.getDate()}</span><span style={{fontSize:10,fontWeight:600,textTransform:"uppercase",color:t.textFaint,marginTop:2}}>{d.toLocaleDateString("en-US",{weekday:"short"})}</span></div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:600,color:t.textSec,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.title}</div><div style={{fontSize:12,color:t.textFaint,marginTop:2}}>{a.time!=="No time"?a.time:"All day"}</div>{cd&&<div style={{fontSize:10,color:"#3b82f6",fontWeight:600,marginTop:2}}>{cd}</div>}</div></div>);})}</div></div>);})}
+  </div>);
+}
 
-    function checkConflict(newAppt, existing) {
-      if (!newAppt.dateObj || !newAppt.timeHour) return null;
-      var newDate = new Date(newAppt.dateObj).toDateString();
-      for (var i = 0; i < existing.length; i++) {
-        var a = existing[i];
-        if (!a.dateObj || !a.timeHour) continue;
-        if (new Date(a.dateObj).toDateString() === newDate && Math.abs(a.timeHour - newAppt.timeHour) < 1) return a;
-      }
-      return null;
-    }
+/* ─── Chart ─── */
+function AppointmentChart({appointments:ap,t}){
+  var[ai,setAi]=useState(null);var wd=ap.filter(a=>a.dateObj).map(a=>({...a,timeHour:a.timeHour!=null?a.timeHour:12}));if(wd.length===0)return null;
+  var as=wd.slice().sort((a,b)=>new Date(a.dateObj)-new Date(b.dateObj)),tc=as.length,s=as.slice(0,8),hm=tc>8;
+  var W=600,H=280,p={top:30,right:30,bottom:55,left:55},pW=W-p.left-p.right,pH=H-p.top-p.bottom;
+  var hrs=s.map(a=>a.timeHour),mn=Math.floor(Math.min(...hrs))-1,mx=Math.ceil(Math.max(...hrs))+1,yr=mx-mn||1;
+  var yS=h=>p.top+pH-((h-mn)/yr)*pH;
+  var ds=s.map(a=>new Date(a.dateObj).getTime()),td=new Date();td.setHours(0,0,0,0);var tMs=td.getTime();
+  var ad=ds.concat([tMs]),mnd=Math.min(...ad),mxd=Math.max(...ad),dr=mxd-mnd||86400000,dm=dr*0.08;
+  var xS=ms=>p.left+pW-((ms-(mnd-dm))/(dr+dm*2))*pW;
+  var pts=s.map(a=>({x:xS(new Date(a.dateObj).getTime()),y:yS(a.timeHour),appt:a})),tX=xS(tMs);
+  var pD="";if(pts.length>1)pD=pts.map((pt,i)=>{if(i===0)return"M "+pt.x+" "+pt.y;var pv=pts[i-1],cx=(pv.x+pt.x)/2;return"C "+cx+" "+pv.y+","+cx+" "+pt.y+","+pt.x+" "+pt.y;}).join(" ");
+  var aD=pts.length>1?pD+" L "+pts[pts.length-1].x+" "+(p.top+pH)+" L "+pts[0].x+" "+(p.top+pH)+" Z":"";
+  var yT=[];for(var h=Math.ceil(mn);h<=Math.floor(mx);h++)yT.push(h);
+  var fH=h=>{var hr=h%24;if(hr===0)return"12am";if(hr===12)return"12pm";return hr<12?hr+"am":(hr-12)+"pm";};
+  return(<div style={{background:t.chartBg,borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,0.3)",padding:20,marginTop:24}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f5c542" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span style={{fontSize:14,fontWeight:700,color:t.chartText}}>Chart</span><span style={{fontSize:12,color:t.chartDim}}>{"\u2014"} tap a dot for details</span></div>
+    <div style={{width:"100%",overflow:"hidden"}}><svg viewBox={"0 0 "+W+" "+H} style={{width:"100%",height:"auto"}} onClick={()=>setAi(null)}>
+      <rect x={p.left} y={p.top} width={pW} height={pH} fill="rgba(255,255,255,0.03)" rx="4"/>
+      {yT.map(h=><g key={h}><line x1={p.left} y1={yS(h)} x2={p.left+pW} y2={yS(h)} stroke={t.chartGrid} strokeWidth="0.7" strokeDasharray="6,4"/><text x={p.left-10} y={yS(h)+4} textAnchor="end" fill={t.chartMuted} fontSize="11" fontFamily="'JetBrains Mono',monospace">{fH(h)}</text></g>)}
+      {pts.map((pt,i)=><line key={i} x1={pt.x} y1={p.top} x2={pt.x} y2={p.top+pH} stroke={t.chartGrid} strokeWidth="0.7" strokeDasharray="6,4"/>)}
+      <line x1={tX} y1={p.top-4} x2={tX} y2={p.top+pH+4} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4,3"/>
+      <rect x={tX-22} y={p.top-18} width="44" height="16" rx="4" fill="#ef4444"/><text x={tX} y={p.top-6} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="700" fontFamily="'DM Sans',sans-serif">TODAY</text>
+      {aD&&<path d={aD} fill="url(#areaGrad)" opacity="0.4"/>}
+      <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5c542" stopOpacity="0.5"/><stop offset="100%" stopColor="#f5c542" stopOpacity="0.02"/></linearGradient></defs>
+      {pD&&<path d={pD} fill="none" stroke="#f5c542" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>}
+      {pts.map((pt,i)=>{var ia=ai===i,d=new Date(pt.appt.dateObj),lb=d.toLocaleDateString("en-US",{month:"short",day:"numeric"});return(<g key={i} onClick={e=>{e.stopPropagation();setAi(ai===i?null:i);}} style={{cursor:"pointer"}}><text x={pt.x} y={p.top+pH+16} textAnchor="middle" fill={t.chartMuted} fontSize="9" fontFamily="'JetBrains Mono',monospace">{lb}</text><circle cx={pt.x} cy={pt.y} r="18" fill="transparent"/><circle cx={pt.x} cy={pt.y} r={ia?10:7} fill="#2d3748" stroke="#f5c542" strokeWidth={ia?3:2.5}/><circle cx={pt.x} cy={pt.y} r={ia?5:3.5} fill="#f5c542"/>{ia&&<g><rect x={pt.x-70} y={pt.y-58} width="140" height="44" rx="8" fill="#1e293b" stroke="#f5c542" strokeWidth="1"/><text x={pt.x} y={pt.y-40} textAnchor="middle" fill="#f5c542" fontSize="10" fontWeight="700" fontFamily="'DM Sans',sans-serif">{pt.appt.title.length>20?pt.appt.title.slice(0,19)+"\u2026":pt.appt.title}</text><text x={pt.x} y={pt.y-24} textAnchor="middle" fill="#94a3b8" fontSize="9" fontFamily="'JetBrains Mono',monospace">{lb+" \u00B7 "+pt.appt.time}</text></g>}</g>);})}
+    </svg></div>
+    {hm&&<div style={{textAlign:"center",marginTop:12,fontSize:12,color:t.chartDim}}>{"Showing 8 of "+tc+" \u2014 "}<span style={{color:"#f5c542",fontWeight:600}}>see calendar for more</span></div>}
+  </div>);
+}
 
-    function generateICS(appointments) {
-      var lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//ExilirCalendar//EN"];
-      appointments.forEach(function(a) {
-        if (!a.dateObj) return;
-        var d = new Date(a.dateObj);
-        var p = function(n) { return String(n).padStart(2, "0"); };
-        var ds = d.getFullYear() + "" + p(d.getMonth() + 1) + p(d.getDate());
-        var dtStart, dtEnd;
-        if (a.timeHour != null) {
-          var h = Math.floor(a.timeHour), m = Math.round((a.timeHour - h) * 60);
-          dtStart = ds + "T" + p(h) + p(m) + "00";
-          dtEnd = ds + "T" + p(h + 1) + p(m) + "00";
-        } else {
-          dtStart = ds;
-          dtEnd = ds;
-        }
-        lines.push("BEGIN:VEVENT");
-        lines.push("DTSTART:" + dtStart);
-        lines.push("DTEND:" + dtEnd);
-        lines.push("SUMMARY:" + a.title);
-        if (a.notes) lines.push("DESCRIPTION:" + a.notes.replace(/\n/g, " "));
-        if (a.category) lines.push("CATEGORIES:" + a.category);
-        lines.push("UID:" + a.id + "@exilircalendar");
-        lines.push("END:VEVENT");
-      });
-      lines.push("END:VCALENDAR");
-      return lines.join("\r\n");
-    }
+/* ─── Calendar Picker ─── */
+function CalendarPicker({value,onChange,onClose,t}){
+  var td=new Date(),init=value?new Date(value):td,[vy,sVy]=useState(init.getFullYear()),[vm,sVm]=useState(init.getMonth()),ref=useRef(null);
+  useEffect(()=>{var h=e=>{if(ref.current&&!ref.current.contains(e.target))onClose();};document.addEventListener("mousedown",h);document.addEventListener("touchstart",h);return()=>{document.removeEventListener("mousedown",h);document.removeEventListener("touchstart",h);};},[onClose]);
+  var dIM=new Date(vy,vm+1,0).getDate(),fd=new Date(vy,vm,1).getDay(),mn=new Date(vy,vm).toLocaleDateString("en-US",{month:"long",year:"numeric"});
+  var pm=()=>{if(vm===0){sVm(11);sVy(vy-1);}else sVm(vm-1);},nm=()=>{if(vm===11){sVm(0);sVy(vy+1);}else sVm(vm+1);};
+  var sel=d=>{var dt=new Date(vy,vm,d);onChange(dt.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}));onClose();};
+  var cells=[];for(var i=0;i<fd;i++)cells.push(null);for(var dd=1;dd<=dIM;dd++)cells.push(dd);
+  var isT=d=>d&&vy===td.getFullYear()&&vm===td.getMonth()&&d===td.getDate();
+  return(<div ref={ref} style={{position:"absolute",top:"100%",left:0,zIndex:100,marginTop:6,background:t.card,borderRadius:14,padding:14,boxShadow:"0 8px 30px rgba(0,0,0,0.15)",border:"1px solid "+t.border,width:280,fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><button onClick={pm} style={{background:"none",border:"none",fontSize:22,color:t.textMuted,cursor:"pointer",padding:"4px 10px",borderRadius:6,fontWeight:600}}>{"\u2039"}</button><span style={{fontSize:14,fontWeight:700,color:t.text}}>{mn}</span><button onClick={nm} style={{background:"none",border:"none",fontSize:22,color:t.textMuted,cursor:"pointer",padding:"4px 10px",borderRadius:6,fontWeight:600}}>{"\u203A"}</button></div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>{["Su","Mo","Tu","We","Th","Fr","Sa"].map(d=><span key={d} style={{fontSize:10,fontWeight:600,color:t.textFaint,textAlign:"center",textTransform:"uppercase",padding:"4px 0"}}>{d}</span>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>{cells.map((d,i)=><button key={i} onClick={()=>{if(d)sel(d);}} style={{width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:500,color:isT(d)?"#fff":t.calCellDay,background:isT(d)?"#3b82f6":"none",border:"none",borderRadius:10,cursor:d?"pointer":"default",margin:"0 auto",visibility:d?"visible":"hidden"}}>{d}</button>)}</div>
+  </div>);
+}
 
-    // Generic sample appointments (no personal data)
-    function generateSampleAppointments() {
-      var now = new Date();
-      var samples = [];
-      var addDays = function(d, n) { var r = new Date(d); r.setDate(r.getDate() + n); return r; };
-      var make = function(id, title, daysFromNow, hour, min, cat, notes, reminder) {
-        var d = addDays(now, daysFromNow); d.setHours(0,0,0,0);
-        var timeHour = hour + min / 60;
-        return {
-          id: id, title: title,
-          date: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
-          time: new Date(2000, 0, 1, hour, min).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
-          dateObj: d.toISOString(), timeHour: timeHour,
-          sortKey: d.getTime() + hour * 60 + min,
-          raw: title, category: cat, notes: notes, reminder: reminder
-        };
-      };
-      samples.push(make(1, "Dentist Checkup", 2, 10, 0, "medical", "Annual cleaning", "1h"));
-      samples.push(make(2, "Team Standup", 3, 9, 30, "work", "Weekly sync", "15m"));
-      samples.push(make(3, "Lunch with Alex", 5, 12, 0, "social", "", "30m"));
-      samples.push(make(4, "Project Deadline", 7, 17, 0, "work", "Submit final report", "1d"));
-      samples.push(make(5, "Yoga Class", 1, 7, 0, "personal", "Bring mat", "30m"));
-      return samples;
-    }
+/* ─── Month Calendar ─── */
+function MonthCalendar({appointments:ap,t,onEdit,onDelete}){
+  var td=new Date(),[vy,sVy]=useState(td.getFullYear()),[vm,sVm]=useState(td.getMonth()),[sd,sSd]=useState(null);
+  var dIM=new Date(vy,vm+1,0).getDate(),fd=new Date(vy,vm,1).getDay(),mn=new Date(vy,vm).toLocaleDateString("en-US",{month:"long",year:"numeric"});
+  var pm=()=>{if(vm===0){sVm(11);sVy(vy-1);}else sVm(vm-1);sSd(null);},nm=()=>{if(vm===11){sVm(0);sVy(vy+1);}else sVm(vm+1);sSd(null);};
+  var gT=()=>{sVy(td.getFullYear());sVm(td.getMonth());sSd(td.getDate());};
+  var dm={};ap.forEach(a=>{if(!a.dateObj)return;var d=new Date(a.dateObj);if(d.getFullYear()===vy&&d.getMonth()===vm){var dy=d.getDate();if(!dm[dy])dm[dy]=[];dm[dy].push(a);}});
+  var cells=[];for(var i=0;i<fd;i++)cells.push(null);for(var dd=1;dd<=dIM;dd++)cells.push(dd);while(cells.length%7!==0)cells.push(null);
+  var isT=d=>d&&vy===td.getFullYear()&&vm===td.getMonth()&&d===td.getDate();
+  var da=sd&&dm[sd]?dm[sd]:[],mt=Object.values(dm).reduce((s,a)=>s+a.length,0);
+  return(<div style={{background:t.card,borderRadius:16,padding:20,marginBottom:24,boxShadow:t.shadow}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><button onClick={pm} style={{background:"none",border:"none",fontSize:24,color:t.textMuted,cursor:"pointer",padding:"4px 12px",borderRadius:8,fontWeight:600}}>{"\u2039"}</button><div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}><span style={{fontSize:17,fontWeight:700,color:t.text}}>{mn}</span>{mt>0&&<span style={{fontSize:11,color:t.textFaint,fontWeight:500}}>{mt+" event"+(mt!==1?"s":"")}</span>}</div><button onClick={nm} style={{background:"none",border:"none",fontSize:24,color:t.textMuted,cursor:"pointer",padding:"4px 12px",borderRadius:8,fontWeight:600}}>{"\u203A"}</button></div>
+    <button onClick={gT} style={{display:"block",margin:"0 auto 14px",padding:"4px 14px",fontSize:12,fontWeight:600,color:"#3b82f6",background:t.badgeBg,border:"none",borderRadius:20,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Today</button>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><span key={d} style={{fontSize:10,fontWeight:600,color:t.textFaint,textAlign:"center",textTransform:"uppercase",padding:"6px 0",letterSpacing:"0.04em"}}>{d}</span>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>{cells.map((day,i)=>{var aps=day?(dm[day]||[]):[],iT=isT(day),iS=day===sd;return(<button key={i} onClick={()=>{if(day)sSd(day===sd?null:day);}} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",minHeight:52,padding:"6px 2px 4px",border:"none",borderRadius:10,cursor:day?"pointer":"default",visibility:day?"visible":"hidden",transition:"background 0.15s",background:iT?(iS?"#2563eb":"#3b82f6"):(iS?t.cardAlt:"transparent")}}><span style={{fontSize:13,fontWeight:600,lineHeight:1,color:iT?"#fff":t.calCellDay}}>{day}</span>{aps.length>0&&<div style={{display:"flex",gap:2,marginTop:4,alignItems:"center",justifyContent:"center",flexWrap:"wrap"}}>{aps.slice(0,3).map((a,j)=><span key={j} style={{width:5,height:5,borderRadius:"50%",background:iT?"#fff":getCatColor(a.category)}}/>)}{aps.length>3&&<span style={{fontSize:8,color:iT?"#bfdbfe":t.textFaint,fontWeight:700}}>+</span>}</div>}</button>);})}</div>
+    {sd&&<div style={{marginTop:16,borderTop:"1px solid "+t.borderLight,paddingTop:14}}>
+      <div style={{fontSize:14,fontWeight:700,color:t.text,marginBottom:10}}>{new Date(vy,vm,sd).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+      {da.length>0?da.map(a=><div key={a.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",borderBottom:"1px solid "+t.borderLight}}>
+        <span style={{width:8,height:8,borderRadius:"50%",background:getCatColor(a.category),marginTop:5,flexShrink:0}}/>
+        <div style={{display:"flex",flexDirection:"column",flex:1,minWidth:0}}><span style={{fontSize:13,fontWeight:600,color:t.textSec}}>{a.title}</span><span style={{fontSize:12,color:t.textFaint,marginTop:1}}>{a.time!=="No time"?a.time:"All day"}</span>{a.notes&&<span style={{fontSize:11,color:t.textFaint,fontStyle:"italic",marginTop:2}}>{a.notes}</span>}</div>
+        <div style={{display:"flex",gap:4,flexShrink:0,marginTop:2}}>
+          <button onClick={()=>onEdit(a)} style={{background:t.cardAlt,border:"none",cursor:"pointer",color:t.textMuted,padding:6,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center"}} title="Edit"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button onClick={()=>onDelete(a.id)} style={{background:t.cardAlt,border:"none",cursor:"pointer",color:t.textMuted,padding:6,borderRadius:6,display:"inline-flex",alignItems:"center",justifyContent:"center"}} title="Delete"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div></div>):<div style={{fontSize:13,color:t.textGhost,fontStyle:"italic"}}>No appointments this day</div>}
+    </div>}
+  </div>);
+}
 
-    const SAMPLE_APPOINTMENTS = generateSampleAppointments();
+/* ─── Exilir Banner ─── */
+function ExilirBanner({t}){return(<div style={{background:t.card,borderRadius:16,padding:"16px 20px",marginBottom:20,boxShadow:t.shadow,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:11,fontWeight:600,color:t.textFaint,textTransform:"uppercase",letterSpacing:"0.05em"}}>Free tool by</span><a href="https://exilir.net" target="_blank" rel="noopener noreferrer" style={{fontSize:16,fontWeight:700,color:"#3b82f6",textDecoration:"none",fontFamily:"'DM Sans',sans-serif"}}>Exilir LLC</a></div><a href="https://exilir.net/classify" target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 16px",fontSize:13,fontWeight:600,color:"#fff",background:"linear-gradient(135deg,#3b82f6,#8b5cf6)",borderRadius:10,textDecoration:"none",fontFamily:"'DM Sans',sans-serif"}}>Try Exilir Classify <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></a></div>);}
 
-    // Dark Mode Toggle
-    function DarkModeToggle({ dark, onToggle }) {
-      return (
-        <button onClick={onToggle} style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "10px 20px",
-          borderRadius: 50, border: "2px solid " + (dark ? "#475569" : "#cbd5e1"),
-          background: dark ? "#334155" : "#e2e8f0", cursor: "pointer",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 15, fontWeight: 600,
-          color: dark ? "#f1f5f9" : "#334155", transition: "all 0.3s",
-        }}>
-          <span style={{ fontSize: 20 }}>{dark ? "\u2600\uFE0F" : "\uD83C\uDF19"}</span>
-          {dark ? "Light" : "Dark"}
-        </button>
-      );
-    }
+/* ─── Main App ─── */
+function CalendarApp(){
+  var[dark,setDark]=useState(false),t=dark?TH.dark:TH.light;
+  var[user,setUser]=useState(null),[syncing,setSyncing]=useState(false);
+  var[inputName,sIN]=useState(""),[inputDate,sID]=useState(""),[inputTime,sIT]=useState("");
+  var[inputCat,sIC]=useState("personal"),[inputNotes,sINt]=useState(""),[inputReminder,sIR]=useState("none");
+  var[appointments,setAp]=useState(SAMPLE_APPOINTMENTS),[flash,setFlash]=useState(false),[loaded,setLoaded]=useState(false);
+  var[editingId,sEId]=useState(null),[editName,sEN]=useState(""),[editDate,sED]=useState(""),[editTime,sET]=useState("");
+  var[editCat,sEC]=useState("personal"),[editNotes,sENt]=useState(""),[editReminder,sER]=useState("none");
+  var[showCal,sSC]=useState(false),[showEditCal,sSEC]=useState(false);
+  var[search,setSearch]=useState(""),[filterCat,setFC]=useState("all"),[conflict,setCf]=useState(null),[showMore,sSM]=useState(false);
+  var saveTimer=useRef(null);
 
-    // Timeline
-    function TimelineGraph({ appointments, t }) {
-      var withDates = appointments.filter(function(a) { return a.dateObj; });
-      if (withDates.length === 0) return null;
-      var now = new Date(); now.setHours(0,0,0,0);
-      var upcoming = withDates.filter(function(a) { return new Date(a.dateObj) >= now; }).sort(function(a, b) { return new Date(a.dateObj) - new Date(b.dateObj); }).slice(0, 3);
-      var sorted = upcoming.length > 0 ? upcoming : withDates.sort(function(a, b) { return new Date(b.dateObj) - new Date(a.dateObj); }).slice(0, 3);
-      var groups = {};
-      sorted.forEach(function(appt) {
-        var d = new Date(appt.dateObj);
-        var key = d.getFullYear() + "-" + String(d.getMonth()).padStart(2, "0");
-        var label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-        if (!groups[key]) groups[key] = { label: label, items: [] };
-        groups[key].items.push(appt);
-      });
-      return (
-        <div style={{ background: t.card, borderRadius: 16, boxShadow: t.shadow, padding: 20, marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Timeline</span>
-            <span style={{ fontSize: 12, color: t.textFaint }}>{"\u2014"} 3 upcoming, nearest first</span>
-          </div>
-          {Object.keys(groups).sort().map(function(mk) {
-            var group = groups[mk];
-            return (
-              <div key={mk} style={{ marginBottom: 24 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: t.textFaint, marginBottom: 10 }}>{group.label}</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {group.items.map(function(appt) {
-                    var d = new Date(appt.dateObj); var color = getCatColor(appt.category); var cd = countdownLabel(appt.dateObj);
-                    return (
-                      <div key={appt.id} style={{ flex: "1 1 160px", minWidth: 150, background: t.cardAlt, borderRadius: 10, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, borderLeft: "4px solid " + color }}>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 36 }}>
-                          <span style={{ fontSize: 22, fontWeight: 700, lineHeight: 1, color: color }}>{d.getDate()}</span>
-                          <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", color: t.textFaint, marginTop: 2 }}>{d.toLocaleDateString("en-US",{weekday:"short"})}</span>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: t.textSec, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{appt.title}</div>
-                          <div style={{ fontSize: 12, color: t.textFaint, marginTop: 2 }}>{appt.time !== "No time" ? appt.time : "All day"}</div>
-                          {cd && <div style={{ fontSize: 10, color: "#3b82f6", fontWeight: 600, marginTop: 2 }}>{cd}</div>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
+  var saveToFS=useCallback(async(uid,data)=>{if(!window.firebaseReady||!uid)return;setSyncing(true);try{await window.fbDb.collection("calendars").doc(uid).set({appointments:JSON.stringify(data),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});}catch(e){console.error("Save error:",e);}setSyncing(false);},[]);
+  var loadFromFS=useCallback(async uid=>{if(!window.firebaseReady||!uid)return null;try{var doc=await window.fbDb.collection("calendars").doc(uid).get();if(doc.exists&&doc.data().appointments)return JSON.parse(doc.data().appointments);}catch(e){console.error("Load error:",e);}return null;},[]);
 
-    // Chart
-    function AppointmentChart({ appointments, t }) {
-      var [activeIdx, setActiveIdx] = useState(null);
-      var withDates = appointments.filter(function(a) { return a.dateObj; }).map(function(a) { return Object.assign({}, a, { timeHour: a.timeHour != null ? a.timeHour : 12 }); });
-      if (withDates.length === 0) return null;
-      var allSorted = withDates.slice().sort(function(a, b) { return new Date(a.dateObj) - new Date(b.dateObj); });
-      var totalCount = allSorted.length;
-      var sorted = allSorted.slice(0, 8);
-      var hasMore = totalCount > 8;
-      var W = 600, H = 280, pad = { top: 30, right: 30, bottom: 55, left: 55 };
-      var plotW = W - pad.left - pad.right, plotH = H - pad.top - pad.bottom;
-      var hours = sorted.map(function(a) { return a.timeHour; });
-      var minH = Math.floor(Math.min.apply(null, hours)) - 1, maxH = Math.ceil(Math.max.apply(null, hours)) + 1;
-      var yRange = maxH - minH || 1;
-      var yScale = function(h) { return pad.top + plotH - ((h - minH) / yRange) * plotH; };
-      var dates = sorted.map(function(a) { return new Date(a.dateObj).getTime(); });
-      var today = new Date(); today.setHours(0,0,0,0); var todayMs = today.getTime();
-      var allDates = dates.concat([todayMs]);
-      var minDate = Math.min.apply(null, allDates), maxDate = Math.max.apply(null, allDates);
-      var dateRange = maxDate - minDate || 86400000;
-      var dateMargin = dateRange * 0.08;
-      var xScale = function(ms) { return pad.left + plotW - ((ms - (minDate - dateMargin)) / (dateRange + dateMargin * 2)) * plotW; };
-      var points = sorted.map(function(a) { return { x: xScale(new Date(a.dateObj).getTime()), y: yScale(a.timeHour), appt: a }; });
-      var todayX = xScale(todayMs);
-      var pathD = "";
-      if (points.length > 1) {
-        pathD = points.map(function(p, i) {
-          if (i === 0) return "M " + p.x + " " + p.y;
-          var prev = points[i-1]; var cpx = (prev.x + p.x) / 2;
-          return "C " + cpx + " " + prev.y + ", " + cpx + " " + p.y + ", " + p.x + " " + p.y;
-        }).join(" ");
-      }
-      var areaD = points.length > 1 ? pathD + " L " + points[points.length-1].x + " " + (pad.top+plotH) + " L " + points[0].x + " " + (pad.top+plotH) + " Z" : "";
-      var yTicks = []; for (var h = Math.ceil(minH); h <= Math.floor(maxH); h++) yTicks.push(h);
-      var fmtH = function(h) { var hr = h%24; if (hr===0) return "12am"; if (hr===12) return "12pm"; return hr<12 ? hr+"am" : (hr-12)+"pm"; };
-      return (
-        <div style={{ background: t.chartBg, borderRadius: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.3)", padding: 20, marginTop: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f5c542" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            <span style={{ fontSize: 14, fontWeight: 700, color: t.chartText }}>Chart</span>
-            <span style={{ fontSize: 12, color: t.chartDim }}>{"\u2014"} tap a dot for details</span>
-          </div>
-          <div style={{ width: "100%", overflow: "hidden" }}>
-            <svg viewBox={"0 0 " + W + " " + H} style={{ width: "100%", height: "auto" }} onClick={function() { setActiveIdx(null); }}>
-              <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="rgba(255,255,255,0.03)" rx="4"/>
-              {yTicks.map(function(h) { return (<g key={h}><line x1={pad.left} y1={yScale(h)} x2={pad.left+plotW} y2={yScale(h)} stroke={t.chartGrid} strokeWidth="0.7" strokeDasharray="6,4"/><text x={pad.left-10} y={yScale(h)+4} textAnchor="end" fill={t.chartMuted} fontSize="11" fontFamily="'JetBrains Mono', monospace">{fmtH(h)}</text></g>); })}
-              {points.map(function(p, i) { return (<line key={i} x1={p.x} y1={pad.top} x2={p.x} y2={pad.top+plotH} stroke={t.chartGrid} strokeWidth="0.7" strokeDasharray="6,4"/>); })}
-              <line x1={todayX} y1={pad.top-4} x2={todayX} y2={pad.top+plotH+4} stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4,3"/>
-              <rect x={todayX-22} y={pad.top-18} width="44" height="16" rx="4" fill="#ef4444"/>
-              <text x={todayX} y={pad.top-6} textAnchor="middle" fill="#fff" fontSize="9" fontWeight="700" fontFamily="'DM Sans', sans-serif">TODAY</text>
-              {areaD && <path d={areaD} fill="url(#areaGrad)" opacity="0.4"/>}
-              <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f5c542" stopOpacity="0.5"/><stop offset="100%" stopColor="#f5c542" stopOpacity="0.02"/></linearGradient></defs>
-              {pathD && <path d={pathD} fill="none" stroke="#f5c542" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>}
-              {points.map(function(p, i) {
-                var isActive = activeIdx === i;
-                var d = new Date(p.appt.dateObj);
-                var label = d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-                return (
-                  <g key={i} onClick={function(e) { e.stopPropagation(); setActiveIdx(activeIdx === i ? null : i); }} style={{ cursor: "pointer" }}>
-                    <text x={p.x} y={pad.top+plotH+16} textAnchor="middle" fill={t.chartMuted} fontSize="9" fontFamily="'JetBrains Mono', monospace">{label}</text>
-                    <circle cx={p.x} cy={p.y} r="18" fill="transparent"/>
-                    <circle cx={p.x} cy={p.y} r={isActive?10:7} fill="#2d3748" stroke="#f5c542" strokeWidth={isActive?3:2.5}/>
-                    <circle cx={p.x} cy={p.y} r={isActive?5:3.5} fill="#f5c542"/>
-                    {isActive && (
-                      <g>
-                        <rect x={p.x-70} y={p.y-58} width="140" height="44" rx="8" fill="#1e293b" stroke="#f5c542" strokeWidth="1"/>
-                        <text x={p.x} y={p.y-40} textAnchor="middle" fill="#f5c542" fontSize="10" fontWeight="700" fontFamily="'DM Sans', sans-serif">{p.appt.title.length > 20 ? p.appt.title.slice(0,19)+"\u2026" : p.appt.title}</text>
-                        <text x={p.x} y={p.y-24} textAnchor="middle" fill="#94a3b8" fontSize="9" fontFamily="'JetBrains Mono', monospace">{label + " \u00B7 " + p.appt.time}</text>
-                      </g>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-          {hasMore && <div style={{ textAlign: "center", marginTop: 12, fontSize: 12, color: t.chartDim }}>{"Showing 8 of " + totalCount + " \u2014 "}<span style={{ color: "#f5c542", fontWeight: 600 }}>see calendar for more</span></div>}
-        </div>
-      );
-    }
+  // Auth listener
+  useEffect(()=>{if(!window.firebaseReady)return;var unsub=window.fbAuth.onAuthStateChanged(async u=>{setUser(u);if(u){setSyncing(true);var cd=await loadFromFS(u.uid);if(cd&&cd.length>0){var now=new Date();now.setHours(0,0,0,0);var cur=cd.filter(a=>!a.dateObj||new Date(a.dateObj)>=now);setAp(cur);try{localStorage.setItem("exilirCalendarAppts",JSON.stringify(cur));}catch(e){}}else{var ld=[];try{var sv=localStorage.getItem("exilirCalendarAppts");if(sv)ld=JSON.parse(sv);}catch(e){}if(ld.length>0)await saveToFS(u.uid,ld);}setSyncing(false);setLoaded(true);}});return()=>unsub();},[]);
 
-    // Calendar Picker
-    function CalendarPicker({ value, onChange, onClose, t }) {
-      var today = new Date();
-      var initial = value ? new Date(value) : today;
-      var [viewYear, setViewYear] = useState(initial.getFullYear());
-      var [viewMonth, setViewMonth] = useState(initial.getMonth());
-      var ref = useRef(null);
-      useEffect(function() {
-        var h = function(e) { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-        document.addEventListener("mousedown", h);
-        document.addEventListener("touchstart", h);
-        return function() { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
-      }, [onClose]);
-      var dIM = new Date(viewYear, viewMonth + 1, 0).getDate();
-      var firstDay = new Date(viewYear, viewMonth, 1).getDay();
-      var monthName = new Date(viewYear, viewMonth).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-      var prevMonth = function() { if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear-1); } else setViewMonth(viewMonth-1); };
-      var nextMonth = function() { if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear+1); } else setViewMonth(viewMonth+1); };
-      var selectDay = function(day) { var d = new Date(viewYear, viewMonth, day); onChange(d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })); onClose(); };
-      var cells = []; for (var i = 0; i < firstDay; i++) cells.push(null); for (var dd = 1; dd <= dIM; dd++) cells.push(dd);
-      var isToday = function(day) { return day && viewYear === today.getFullYear() && viewMonth === today.getMonth() && day === today.getDate(); };
-      return (
-        <div ref={ref} style={{ position: "absolute", top: "100%", left: 0, zIndex: 100, marginTop: 6, background: t.card, borderRadius: 14, padding: 14, boxShadow: "0 8px 30px rgba(0,0,0,0.15)", border: "1px solid " + t.border, width: 280, fontFamily: "'DM Sans', sans-serif" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <button onClick={prevMonth} style={{ background: "none", border: "none", fontSize: 22, color: t.textMuted, cursor: "pointer", padding: "4px 10px", borderRadius: 6, fontWeight: 600 }}>{"\u2039"}</button>
-            <span style={{ fontSize: 14, fontWeight: 700, color: t.text }}>{monthName}</span>
-            <button onClick={nextMonth} style={{ background: "none", border: "none", fontSize: 22, color: t.textMuted, cursor: "pointer", padding: "4px 10px", borderRadius: 6, fontWeight: 600 }}>{"\u203A"}</button>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
-            {["Su","Mo","Tu","We","Th","Fr","Sa"].map(function(d) { return (<span key={d} style={{ fontSize: 10, fontWeight: 600, color: t.textFaint, textAlign: "center", textTransform: "uppercase", padding: "4px 0" }}>{d}</span>); })}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
-            {cells.map(function(day, i) { return (<button key={i} onClick={function() { if (day) selectDay(day); }} style={{ width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 500, color: isToday(day) ? "#fff" : t.calCellDay, background: isToday(day) ? "#3b82f6" : "none", border: "none", borderRadius: 10, cursor: day ? "pointer" : "default", margin: "0 auto", visibility: day ? "visible" : "hidden" }}>{day}</button>); })}
+  // Load from localStorage (fallback)
+  useEffect(()=>{if(user)return;try{var dv=localStorage.getItem("exilirCalendarDark");if(dv!==null)setDark(dv==="true");}catch(e){}try{var sv=localStorage.getItem("exilirCalendarAppts");if(sv){var p=JSON.parse(sv);if(p.length>0){var now=new Date();now.setHours(0,0,0,0);var cur=p.filter(a=>!a.dateObj||new Date(a.dateObj)>=now);setAp(cur);if(cur.length<p.length&&cur.length>0)localStorage.setItem("exilirCalendarAppts",JSON.stringify(cur));setLoaded(true);return;}}}catch(e){}var now2=new Date();now2.setHours(0,0,0,0);setAp(SAMPLE_APPOINTMENTS.filter(a=>!a.dateObj||new Date(a.dateObj)>=now2));setLoaded(true);},[user]);
+
+  // Save on change
+  useEffect(()=>{if(!loaded)return;if(appointments.length>0)try{localStorage.setItem("exilirCalendarAppts",JSON.stringify(appointments));}catch(e){}if(user&&window.firebaseReady){if(saveTimer.current)clearTimeout(saveTimer.current);saveTimer.current=setTimeout(()=>saveToFS(user.uid,appointments),1000);}},[appointments,loaded,user,saveToFS]);
+
+  var handleSignIn=async()=>{if(!window.firebaseReady)return;try{await window.fbAuth.signInWithPopup(window.fbGoogleProvider);}catch(e){console.error("Sign-in error:",e);}};
+  var handleSignOut=async()=>{if(!window.firebaseReady)return;try{await window.fbAuth.signOut();}catch(e){}};
+  var toggleDark=()=>{var n=!dark;setDark(n);try{localStorage.setItem("exilirCalendarDark",String(n));}catch(e){}};
+
+  var addAppointment=()=>{var c=(inputName+" "+inputDate+" "+inputTime).trim(),p=parseAppointment(c);if(!p)return;p.category=inputCat;p.notes=inputNotes;p.reminder=inputReminder;var cf=checkConflict(p,appointments);if(cf){setCf(cf);setTimeout(()=>setCf(null),4000);}setAp(appointments.concat([p]).sort((a,b)=>a.sortKey-b.sortKey));sIN("");sID("");sIT("");sIC("personal");sINt("");sIR("none");sSC(false);sSM(false);setFlash(true);setTimeout(()=>setFlash(false),600);};
+  var removeAppointment=id=>{var u=appointments.filter(a=>a.id!==id);setAp(u);if(u.length===0){try{localStorage.removeItem("exilirCalendarAppts");}catch(e){}if(user&&window.firebaseReady)saveToFS(user.uid,[]);}};
+  var startEdit=a=>{sEId(a.id);sEN(a.title);sED(a.date);sET(a.time);sEC(a.category||"personal");sENt(a.notes||"");sER(a.reminder||"none");};
+  var cancelEdit=()=>{sEId(null);sSEC(false);};
+  var saveEdit=id=>{var p=parseAppointment((editName+" "+editDate+" "+editTime).trim());if(!p)return;p.id=id;p.category=editCat;p.notes=editNotes;p.reminder=editReminder;setAp(appointments.map(a=>a.id===id?p:a).sort((a,b)=>a.sortKey-b.sortKey));sEId(null);sSEC(false);};
+  var handleEditKD=(e,id)=>{if(e.key==="Enter")saveEdit(id);else if(e.key==="Escape")cancelEdit();else e.stopPropagation();};
+  var clearAll=()=>{setAp([]);try{localStorage.removeItem("exilirCalendarAppts");}catch(e){}if(user&&window.firebaseReady)saveToFS(user.uid,[]);};
+  var exportCSV=()=>{var h="Appointment,Date,Time,Category,Notes,Reminder\n",r=appointments.map(a=>'"'+a.title.replace(/"/g,'""')+'","'+a.date+'","'+a.time+'","'+(a.category||"")+'","'+(a.notes||"").replace(/"/g,'""')+'","'+(a.reminder||"")+'"').join("\n");var b=new Blob([h+r],{type:"text/csv;charset=utf-8;"});var u=URL.createObjectURL(b);var el=document.createElement("a");el.href=u;el.download="appointments.csv";el.click();URL.revokeObjectURL(u);};
+  var exportICS=()=>{var ics=generateICS(appointments);var b=new Blob([ics],{type:"text/calendar;charset=utf-8;"});var u=URL.createObjectURL(b);var el=document.createElement("a");el.href=u;el.download="appointments.ics";el.click();URL.revokeObjectURL(u);};
+  var handleKD=e=>{if(e.key==="Enter")addAppointment();};
+  var todayStr=new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  var filtered=appointments.filter(a=>{var ms=!search||a.title.toLowerCase().includes(search.toLowerCase())||(a.notes||"").toLowerCase().includes(search.toLowerCase());var mc=filterCat==="all"||a.category===filterCat;return ms&&mc;});
+  var inp={width:"100%",padding:"12px 14px",fontSize:16,fontFamily:"'DM Sans',sans-serif",border:"2px solid "+t.inputBorder,borderRadius:10,outline:"none",color:t.textSec,background:t.inputBg};
+  var sel={...inp,fontSize:14,cursor:"pointer"};
+  var edt={...inp,border:"2px solid #3b82f6",background:t.editBg};
+  var lbl={fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",color:t.textFaint};
+  var thS={textAlign:"left",padding:"10px 16px",fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",color:t.textFaint,background:t.thBg,borderBottom:"1px solid "+t.borderLight};
+  var getRows=()=>{var v=filtered.slice(0,3),eiv=v.some(a=>a.id===editingId),ea=!eiv&&editingId?filtered.find(a=>a.id===editingId):null;return ea?v.concat([ea]):v;};
+
+  return(<div style={{minHeight:"100vh",background:t.bg,fontFamily:"'DM Sans',sans-serif",display:"flex",justifyContent:"center",padding:"32px 16px",transition:"background 0.3s"}}>
+    <div style={{width:"100%",maxWidth:720}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
+        <div style={{width:48,height:48,borderRadius:14,background:t.iconBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+        <div style={{flex:1}}><h1 style={{fontSize:24,fontWeight:700,color:t.text,letterSpacing:"-0.02em"}}>Exilir Calendar</h1><p style={{fontSize:14,color:t.textFaint,marginTop:2}}>{user?"Synced across your devices":"Your data stays private on your device"}</p></div>
+        <DarkModeToggle dark={dark} onToggle={toggleDark}/>
+      </div>
+      <AuthBar user={user} t={t} onSignIn={handleSignIn} onSignOut={handleSignOut} syncing={syncing}/>
+      <ExilirBanner t={t}/>
+      {/* Input */}
+      <div style={{background:t.card,borderRadius:16,padding:20,boxShadow:t.shadow,marginBottom:24,display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>APPOINTMENT</label><input type="text" value={inputName} onChange={e=>sIN(e.target.value)} onKeyDown={handleKD} placeholder="Dentist, Meeting..." style={inp}/></div></div>
+        <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4,position:"relative"}}><label style={lbl}>DATE</label><input type="text" value={inputDate} onChange={e=>sID(e.target.value)} onFocus={()=>sSC(true)} onKeyDown={handleKD} placeholder={todayStr} style={inp} readOnly/>{showCal&&<CalendarPicker value={inputDate} onChange={v=>sID(v)} onClose={()=>sSC(false)} t={t}/>}</div><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>TIME</label><input type="text" value={inputTime} onChange={e=>sIT(e.target.value)} onKeyDown={handleKD} placeholder="5:00pm" style={inp}/></div></div>
+        <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>CATEGORY</label><select value={inputCat} onChange={e=>sIC(e.target.value)} style={sel}>{CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select></div><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>REMINDER</label><select value={inputReminder} onChange={e=>sIR(e.target.value)} style={sel}>{REMINDERS.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}</select></div></div>
+        {showMore&&<div style={{display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>NOTES</label><textarea value={inputNotes} onChange={e=>sINt(e.target.value)} placeholder="Add details..." style={{...inp,fontSize:14,resize:"vertical"}} rows={2}/></div>}
+        <div style={{display:"flex",gap:8}}><button onClick={()=>sSM(!showMore)} style={{padding:"12px 16px",fontSize:13,fontWeight:500,fontFamily:"'DM Sans',sans-serif",background:t.toggleBg,color:t.textMuted,border:"none",borderRadius:10,cursor:"pointer",whiteSpace:"nowrap"}}>{showMore?"Less":"+ Notes"}</button><button onClick={addAppointment} style={{flex:1,padding:"12px 24px",fontSize:15,fontWeight:600,fontFamily:"'DM Sans',sans-serif",background:"#3b82f6",color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>Add</button></div>
+        {conflict&&<div style={{background:t.conflictBg,border:"1px solid "+t.conflictBorder,borderRadius:10,padding:"10px 14px",fontSize:13,color:t.conflictText,fontWeight:500}}>{"\u26A0\uFE0F Possible conflict with \""+conflict.title+"\" at "+conflict.time}</div>}
+      </div>
+      <TimelineGraph appointments={appointments} t={t}/>
+      <MonthCalendar appointments={appointments} t={t} onEdit={startEdit} onDelete={removeAppointment}/>
+      {/* Search */}
+      {appointments.length>0&&<div style={{display:"flex",gap:8,marginBottom:16}}><input type="text" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search appointments..." style={{...inp,flex:1,background:t.searchBg}}/><select value={filterCat} onChange={e=>setFC(e.target.value)} style={{...sel,flex:"none",width:"auto"}}><option value="all">All categories</option>{CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select></div>}
+      {/* Table */}
+      {filtered.length>0?(<div style={{background:t.card,borderRadius:16,boxShadow:t.shadow,overflow:"hidden"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",borderBottom:"1px solid "+t.borderLight,flexWrap:"wrap",gap:8}}>
+          <span style={{fontSize:13,fontWeight:600,color:"#3b82f6",background:t.badgeBg,padding:"4px 12px",borderRadius:20}}>{filtered.length+" appointment"+(filtered.length!==1?"s":"")}</span>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <button onClick={exportICS} style={{fontSize:12,fontWeight:600,color:"#8b5cf6",background:t.icsBtn,border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:4}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>.ics</button>
+            <button onClick={exportCSV} style={{fontSize:12,fontWeight:600,color:"#10b981",background:t.csvBtn,border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:4}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>CSV</button>
+            <button onClick={clearAll} style={{fontSize:12,color:t.textFaint,background:"none",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:500}}>Clear all</button>
           </div>
         </div>
-      );
-    }
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={thS}>Appointment</th><th style={thS}>Date</th><th style={thS}>Time</th><th style={thS}>Info</th><th style={{...thS,textAlign:"center"}}>Actions</th></tr></thead><tbody>
+          {getRows().map((appt,i)=>{if(editingId===appt.id)return(<tr key={appt.id} style={{borderBottom:"1px solid "+t.borderLight}}><td colSpan="5" style={{padding:"12px 16px"}}><div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>APPOINTMENT</label><input type="text" value={editName} onChange={e=>sEN(e.target.value)} onKeyDown={e=>handleEditKD(e,appt.id)} style={edt} autoFocus/></div></div>
+            <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4,position:"relative"}}><label style={lbl}>DATE</label><input type="text" value={editDate} onChange={e=>sED(e.target.value)} onFocus={()=>sSEC(true)} onKeyDown={e=>handleEditKD(e,appt.id)} style={edt} readOnly/>{showEditCal&&<CalendarPicker value={editDate} onChange={v=>sED(v)} onClose={()=>sSEC(false)} t={t}/>}</div><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>TIME</label><input type="text" value={editTime} onChange={e=>sET(e.target.value)} onKeyDown={e=>handleEditKD(e,appt.id)} style={edt}/></div></div>
+            <div style={{display:"flex",gap:10}}><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>CATEGORY</label><select value={editCat} onChange={e=>sEC(e.target.value)} style={edt}>{CATEGORIES.map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</select></div><div style={{flex:1,display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>REMINDER</label><select value={editReminder} onChange={e=>sER(e.target.value)} style={edt}>{REMINDERS.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}</select></div></div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={lbl}>NOTES</label><textarea value={editNotes} onChange={e=>sENt(e.target.value)} style={{...edt,resize:"vertical"}} rows={2}/></div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button onClick={()=>saveEdit(appt.id)} style={{padding:"8px 16px",fontSize:13,fontWeight:600,fontFamily:"'DM Sans',sans-serif",background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,cursor:"pointer"}}>Save</button><button onClick={cancelEdit} style={{padding:"8px 16px",fontSize:13,fontWeight:500,fontFamily:"'DM Sans',sans-serif",background:t.toggleBg,color:t.textMuted,border:"none",borderRadius:8,cursor:"pointer"}}>Cancel</button></div>
+          </div></td></tr>);
+          return(<tr key={appt.id} style={{borderBottom:"1px solid "+t.borderLight,animation:flash&&i===0?"slideIn 0.4s ease":"none"}}>
+            <td style={{padding:"12px 16px",fontSize:13,color:t.textSec,verticalAlign:"middle"}}><span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:getCatColor(appt.category),marginRight:8,verticalAlign:"middle"}}/>{appt.title}</td>
+            <td style={{padding:"12px 16px",fontSize:12,color:t.textMuted,fontFamily:"'JetBrains Mono',monospace",verticalAlign:"middle"}}>{appt.date}</td>
+            <td style={{padding:"12px 16px",fontSize:12,color:t.textMuted,fontFamily:"'JetBrains Mono',monospace",verticalAlign:"middle"}}>{appt.time}</td>
+            <td style={{padding:"12px 16px",verticalAlign:"middle"}}><div style={{display:"flex",gap:4}}>{appt.notes&&<span title={appt.notes} style={{fontSize:14}}>{"\uD83D\uDCDD"}</span>}{appt.reminder&&appt.reminder!=="none"&&<span title={REMINDERS.find(r=>r.key===appt.reminder)?.label} style={{fontSize:14}}>{"\uD83D\uDD14"}</span>}</div></td>
+            <td style={{padding:"12px 16px",textAlign:"center",verticalAlign:"middle"}}><div style={{display:"flex",gap:4,justifyContent:"center"}}>
+              <button onClick={()=>startEdit(appt)} style={{background:"none",border:"none",cursor:"pointer",color:t.textGhost,padding:5,borderRadius:6,display:"inline-flex"}} title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+              <button onClick={()=>removeAppointment(appt.id)} style={{background:"none",border:"none",cursor:"pointer",color:t.textGhost,padding:5,borderRadius:6,display:"inline-flex"}} title="Remove"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div></td></tr>);})}
+        </tbody></table></div>
+        {filtered.length>3&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 20px",borderTop:"1px solid "+t.borderLight}}><span style={{fontSize:13,color:t.textFaint,fontWeight:500}}>{(filtered.length-3)+" more appointment"+(filtered.length-3!==1?"s":"")}</span><button onClick={exportCSV} style={{fontSize:13,fontWeight:600,color:"#3b82f6",background:"none",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>{"\u2192 Download CSV for full list"}</button></div>}
+      </div>):appointments.length>0?(<div style={{background:t.card,borderRadius:16,padding:"48px 20px",textAlign:"center",boxShadow:t.shadow}}><p style={{fontSize:16,fontWeight:600,color:t.textFaint,marginTop:16}}>No matching appointments</p><p style={{fontSize:14,color:t.textGhost,marginTop:6}}>Try a different search or filter</p></div>):(<div style={{background:t.card,borderRadius:16,padding:"48px 20px",textAlign:"center",boxShadow:t.shadow}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={t.textGhost} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="10" y1="14" x2="14" y2="14"/></svg><p style={{fontSize:16,fontWeight:600,color:t.textFaint,marginTop:16}}>No appointments yet</p><p style={{fontSize:14,color:t.textGhost,marginTop:6}}>Add one above to get started</p></div>)}
+      <AppointmentChart key={appointments.map(a=>a.id).join("-")} appointments={appointments} t={t}/>
+      {/* Footer */}
+      <div style={{textAlign:"center",padding:"32px 0 16px",fontSize:12,color:t.textFaint}}>
+        <span>{user?"Your appointments sync securely via your Google account.":"Sign in with Google to sync across all your devices."}</span>
+        <div style={{marginTop:8}}><a href="https://exilir.net" target="_blank" rel="noopener noreferrer" style={{color:"#3b82f6",textDecoration:"none",fontWeight:600}}>Exilir LLC</a><span style={{margin:"0 8px"}}>{"\u00B7"}</span><a href="https://exilir.net/classify" target="_blank" rel="noopener noreferrer" style={{color:"#8b5cf6",textDecoration:"none",fontWeight:600}}>Try Exilir Classify</a></div>
+      </div>
+    </div>
+  </div>);
+}
 
-    // Month Calendar
-    function MonthCalendar({ appointments, t, onEdit, onDelete }) {
-      var today = new Date();
-      var [viewYear, setViewYear] = useState(today.getFullYear());
-      var [viewMonth, setViewMonth] = useState(today.getMonth());
-      var [selectedDay, setSelectedDay] = useState(null);
-      var dIM = new Date(viewYear, viewMonth + 1, 0).getDate();
-      var firstDay = new Date(viewYear, viewMonth, 1).getDay();
-      var monthName = new Date(viewYear, viewMonth).toLocaleDateString("en-US", { month: "long", year: "numeric" });
-      var prevMonth = function() { if (viewMonth === 0) { setViewMonth(11); setViewYear(viewYear-1); } else setViewMonth(viewMonth-1); setSelectedDay(null); };
-      var nextMonth = function() { if (viewMonth === 11) { setViewMonth(0); setViewYear(viewYear+1); } else setViewMonth(viewMonth+1); setSelectedDay(null); };
-      var goToday = function() { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()); setSelectedDay(today.getDate()); };
-      var dayMap = {};
-      appointments.forEach(function(a) { if (!a.dateObj) return; var d = new Date(a.dateObj); if (d.getFullYear() === viewYear && d.getMonth() === viewMonth) { var day = d.getDate(); if (!dayMap[day]) dayMap[day] = []; dayMap[day].push(a); } });
-      var cells = []; for (var i = 0; i < firstDay; i++) cells.push(null); for (var dd = 1; dd <= dIM; dd++) cells.push(dd); while (cells.length % 7 !== 0) cells.push(null);
-      var isToday = function(day) { return day && viewYear === today.getFullYear() && viewMonth === today.getMonth() && day === today.getDate(); };
-      var dayAppts = selectedDay && dayMap[selectedDay] ? dayMap[selectedDay] : [];
-      var monthTotal = Object.values(dayMap).reduce(function(sum, arr) { return sum + arr.length; }, 0);
-      return (
-        <div style={{ background: t.card, borderRadius: 16, padding: 20, marginBottom: 24, boxShadow: t.shadow }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <button onClick={prevMonth} style={{ background: "none", border: "none", fontSize: 24, color: t.textMuted, cursor: "pointer", padding: "4px 12px", borderRadius: 8, fontWeight: 600 }}>{"\u2039"}</button>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-              <span style={{ fontSize: 17, fontWeight: 700, color: t.text }}>{monthName}</span>
-              {monthTotal > 0 && <span style={{ fontSize: 11, color: t.textFaint, fontWeight: 500 }}>{monthTotal + " event" + (monthTotal !== 1 ? "s" : "")}</span>}
-            </div>
-            <button onClick={nextMonth} style={{ background: "none", border: "none", fontSize: 24, color: t.textMuted, cursor: "pointer", padding: "4px 12px", borderRadius: 8, fontWeight: 600 }}>{"\u203A"}</button>
-          </div>
-          <button onClick={goToday} style={{ display: "block", margin: "0 auto 14px", padding: "4px 14px", fontSize: 12, fontWeight: 600, color: "#3b82f6", background: t.badgeBg, border: "none", borderRadius: 20, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>Today</button>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
-            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(function(d) { return (<span key={d} style={{ fontSize: 10, fontWeight: 600, color: t.textFaint, textAlign: "center", textTransform: "uppercase", padding: "6px 0", letterSpacing: "0.04em" }}>{d}</span>); })}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
-            {cells.map(function(day, i) {
-              var appts = day ? (dayMap[day] || []) : [];
-              var isTod = isToday(day);
-              var isSel = day === selectedDay;
-              return (
-                <button key={i} onClick={function() { if (day) setSelectedDay(day === selectedDay ? null : day); }} style={{
-                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
-                  minHeight: 52, padding: "6px 2px 4px", border: "none", borderRadius: 10, cursor: day ? "pointer" : "default",
-                  visibility: day ? "visible" : "hidden", transition: "background 0.15s",
-                  background: isTod ? (isSel ? "#2563eb" : "#3b82f6") : (isSel ? t.cardAlt : "transparent"),
-                }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1, color: isTod ? "#fff" : t.calCellDay }}>{day}</span>
-                  {appts.length > 0 && (
-                    <div style={{ display: "flex", gap: 2, marginTop: 4, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
-                      {appts.slice(0,3).map(function(a,j) { return (<span key={j} style={{ width: 5, height: 5, borderRadius: "50%", background: isTod ? "#fff" : getCatColor(a.category) }}></span>); })}
-                      {appts.length > 3 && <span style={{ fontSize: 8, color: isTod ? "#bfdbfe" : t.textFaint, fontWeight: 700 }}>+</span>}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          {selectedDay && (
-            <div style={{ marginTop: 16, borderTop: "1px solid " + t.borderLight, paddingTop: 14 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 10 }}>{new Date(viewYear, viewMonth, selectedDay).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
-              {dayAppts.length > 0 ? dayAppts.map(function(a) {
-                return (
-                  <div key={a.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderBottom: "1px solid " + t.borderLight }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: getCatColor(a.category), marginTop: 5, flexShrink: 0 }}></span>
-                    <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: t.textSec }}>{a.title}</span>
-                      <span style={{ fontSize: 12, color: t.textFaint, marginTop: 1 }}>{a.time !== "No time" ? a.time : "All day"}</span>
-                      {a.notes && <span style={{ fontSize: 11, color: t.textFaint, fontStyle: "italic", marginTop: 2 }}>{a.notes}</span>}
-                    </div>
-                    <div style={{ display: "flex", gap: 4, flexShrink: 0, marginTop: 2 }}>
-                      <button onClick={function() { onEdit(a); }} style={{ background: t.cardAlt, border: "none", cursor: "pointer", color: t.textMuted, padding: 6, borderRadius: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" }} title="Edit">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                      </button>
-                      <button onClick={function() { onDelete(a.id); }} style={{ background: t.cardAlt, border: "none", cursor: "pointer", color: t.textMuted, padding: 6, borderRadius: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" }} title="Delete">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                      </button>
-                    </div>
-                  </div>
-                );
-              }) : <div style={{ fontSize: 13, color: t.textGhost, fontStyle: "italic" }}>No appointments this day</div>}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // Exilir Branding Banner
-    function ExilirBanner({ t }) {
-      return (
-        <div style={{ 
-          background: t.card, borderRadius: 16, padding: "16px 20px", marginBottom: 24, boxShadow: t.shadow,
-          display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: t.textFaint, textTransform: "uppercase", letterSpacing: "0.05em" }}>Free tool by</span>
-            <a href="https://exilir.net" target="_blank" rel="noopener noreferrer" style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", textDecoration: "none", fontFamily: "'DM Sans', sans-serif" }}>Exilir LLC</a>
-          </div>
-          <a href="https://exilir.net/classify" target="_blank" rel="noopener noreferrer" style={{
-            display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: 13, fontWeight: 600,
-            color: "#fff", background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", borderRadius: 10,
-            textDecoration: "none", fontFamily: "'DM Sans', sans-serif", transition: "opacity 0.2s",
-          }}>
-            Try Exilir Classify
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-          </a>
-        </div>
-      );
-    }
-
-    // Main App
-    function CalendarApp() {
-      var [dark, setDark] = useState(false);
-      var t = dark ? TH.dark : TH.light;
-      var [inputName, setInputName] = useState("");
-      var [inputDate, setInputDate] = useState("");
-      var [inputTime, setInputTime] = useState("");
-      var [inputCat, setInputCat] = useState("personal");
-      var [inputNotes, setInputNotes] = useState("");
-      var [inputReminder, setInputReminder] = useState("none");
-      var [appointments, setAppointments] = useState(SAMPLE_APPOINTMENTS);
-      var [flash, setFlash] = useState(false);
-      var [loaded, setLoaded] = useState(false);
-      var [editingId, setEditingId] = useState(null);
-      var [editName, setEditName] = useState("");
-      var [editDate, setEditDate] = useState("");
-      var [editTime, setEditTime] = useState("");
-      var [editCat, setEditCat] = useState("personal");
-      var [editNotes, setEditNotes] = useState("");
-      var [editReminder, setEditReminder] = useState("none");
-      var [showCal, setShowCal] = useState(false);
-      var [showEditCal, setShowEditCal] = useState(false);
-      var [search, setSearch] = useState("");
-      var [filterCat, setFilterCat] = useState("all");
-      var [conflict, setConflict] = useState(null);
-      var [showMoreFields, setShowMoreFields] = useState(false);
-
-      // Load from localStorage (private per user/browser)
-      useEffect(function() {
-        try {
-          var darkVal = localStorage.getItem("exilirCalendarDark");
-          if (darkVal !== null) setDark(darkVal === "true");
-        } catch(e){}
-        try {
-          var saved = localStorage.getItem("exilirCalendarAppts");
-          if (saved) {
-            var parsed = JSON.parse(saved);
-            if (parsed.length > 0) {
-              var now = new Date(); now.setHours(0,0,0,0);
-              var current = parsed.filter(function(a) { return !a.dateObj || new Date(a.dateObj) >= now; });
-              setAppointments(current);
-              if (current.length < parsed.length && current.length > 0) {
-                localStorage.setItem("exilirCalendarAppts", JSON.stringify(current));
-              }
-              setLoaded(true);
-              return;
-            }
-          }
-        } catch (e) {}
-        var now2 = new Date(); now2.setHours(0,0,0,0);
-        setAppointments(SAMPLE_APPOINTMENTS.filter(function(a) { return !a.dateObj || new Date(a.dateObj) >= now2; }));
-        setLoaded(true);
-      }, []);
-
-      // Save to localStorage on change
-      useEffect(function() {
-        if (!loaded) return;
-        if (appointments.length > 0) {
-          try { localStorage.setItem("exilirCalendarAppts", JSON.stringify(appointments)); } catch (e) {}
-        }
-      }, [appointments, loaded]);
-
-      var toggleDark = function() {
-        var next = !dark;
-        setDark(next);
-        try { localStorage.setItem("exilirCalendarDark", String(next)); } catch(e){}
-      };
-
-      var addAppointment = function() {
-        var combined = (inputName + " " + inputDate + " " + inputTime).trim();
-        var parsed = parseAppointment(combined); if (!parsed) return;
-        parsed.category = inputCat; parsed.notes = inputNotes; parsed.reminder = inputReminder;
-        var conf = checkConflict(parsed, appointments);
-        if (conf) { setConflict(conf); setTimeout(function() { setConflict(null); }, 4000); }
-        setAppointments(appointments.concat([parsed]).sort(function(a, b) { return a.sortKey - b.sortKey; }));
-        setInputName(""); setInputDate(""); setInputTime(""); setInputCat("personal"); setInputNotes(""); setInputReminder("none"); setShowCal(false); setShowMoreFields(false);
-        setFlash(true); setTimeout(function() { setFlash(false); }, 600);
-      };
-
-      var removeAppointment = function(id) {
-        var u = appointments.filter(function(a) { return a.id !== id; });
-        setAppointments(u);
-        if (u.length === 0) { try { localStorage.removeItem("exilirCalendarAppts"); } catch(e){} }
-      };
-
-      var startEdit = function(appt) {
-        setEditingId(appt.id); setEditName(appt.title); setEditDate(appt.date); setEditTime(appt.time);
-        setEditCat(appt.category||"personal"); setEditNotes(appt.notes||""); setEditReminder(appt.reminder||"none");
-      };
-      var cancelEdit = function() { setEditingId(null); setShowEditCal(false); };
-      var saveEdit = function(id) {
-        var p = parseAppointment((editName + " " + editDate + " " + editTime).trim()); if (!p) return;
-        p.id = id; p.category = editCat; p.notes = editNotes; p.reminder = editReminder;
-        setAppointments(appointments.map(function(a) { return a.id === id ? p : a; }).sort(function(a, b) { return a.sortKey - b.sortKey; }));
-        setEditingId(null); setShowEditCal(false);
-      };
-      var handleEditKeyDown = function(e, id) { if (e.key === "Enter") saveEdit(id); else if (e.key === "Escape") cancelEdit(); else e.stopPropagation(); };
-      var clearAll = function() {
-        setAppointments([]);
-        try { localStorage.removeItem("exilirCalendarAppts"); } catch(e){}
-      };
-      var exportCSV = function() {
-        var h = "Appointment,Date,Time,Category,Notes,Reminder\n";
-        var rows = appointments.map(function(a) { return '"' + a.title.replace(/"/g,'""') + '","' + a.date + '","' + a.time + '","' + (a.category||"") + '","' + (a.notes||"").replace(/"/g,'""') + '","' + (a.reminder||"") + '"'; }).join("\n");
-        var b = new Blob([h + rows], { type: "text/csv;charset=utf-8;" }); var u = URL.createObjectURL(b); var el = document.createElement("a"); el.href = u; el.download = "appointments.csv"; el.click(); URL.revokeObjectURL(u);
-      };
-      var exportICS = function() {
-        var ics = generateICS(appointments);
-        var b = new Blob([ics], { type: "text/calendar;charset=utf-8;" }); var u = URL.createObjectURL(b); var el = document.createElement("a"); el.href = u; el.download = "appointments.ics"; el.click(); URL.revokeObjectURL(u);
-      };
-      var handleKeyDown = function(e) { if (e.key === "Enter") addAppointment(); };
-      var todayStr = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-      var filtered = appointments.filter(function(a) {
-        var ms = !search || a.title.toLowerCase().includes(search.toLowerCase()) || (a.notes||"").toLowerCase().includes(search.toLowerCase());
-        var mc = filterCat === "all" || a.category === filterCat;
-        return ms && mc;
-      });
-
-      var inp = { width: "100%", padding: "12px 14px", fontSize: 16, fontFamily: "'DM Sans', sans-serif", border: "2px solid " + t.inputBorder, borderRadius: 10, outline: "none", color: t.textSec, background: t.inputBg };
-      var sel = Object.assign({}, inp, { fontSize: 14, cursor: "pointer" });
-      var edt = Object.assign({}, inp, { border: "2px solid #3b82f6", background: t.editBg });
-      var lbl = { fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: t.textFaint };
-      var thStyle = { textAlign: "left", padding: "10px 16px", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: t.textFaint, background: t.thBg, borderBottom: "1px solid " + t.borderLight };
-
-      var getTableRows = function() {
-        var visible = filtered.slice(0, 3);
-        var editingInVisible = visible.some(function(a) { return a.id === editingId; });
-        var editingAppt = !editingInVisible && editingId ? filtered.find(function(a) { return a.id === editingId; }) : null;
-        return editingAppt ? visible.concat([editingAppt]) : visible;
-      };
-
-      return (
-        <div style={{ minHeight: "100vh", background: t.bg, fontFamily: "'DM Sans', sans-serif", display: "flex", justifyContent: "center", padding: "32px 16px", transition: "background 0.3s" }}>
-          <div style={{ width: "100%", maxWidth: 720 }}>
-
-            {/* Header */}
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 28 }}>
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: t.iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              </div>
-              <div style={{ flex: 1 }}>
-                <h1 style={{ fontSize: 24, fontWeight: 700, color: t.text, letterSpacing: "-0.02em" }}>Exilir Calendar</h1>
-                <p style={{ fontSize: 14, color: t.textFaint, marginTop: 2 }}>Your data stays private on your device</p>
-              </div>
-              <DarkModeToggle dark={dark} onToggle={toggleDark} />
-            </div>
-
-            {/* Exilir Banner */}
-            <ExilirBanner t={t} />
-
-            {/* Input Area */}
-            <div style={{ background: t.card, borderRadius: 16, padding: 20, boxShadow: t.shadow, marginBottom: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={lbl}>APPOINTMENT</label>
-                  <input type="text" value={inputName} onChange={function(e) { setInputName(e.target.value); }} onKeyDown={handleKeyDown} placeholder="Dentist, Meeting..." style={inp} />
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, position: "relative" }}>
-                  <label style={lbl}>DATE</label>
-                  <input type="text" value={inputDate} onChange={function(e) { setInputDate(e.target.value); }} onFocus={function() { setShowCal(true); }} onKeyDown={handleKeyDown} placeholder={todayStr} style={inp} readOnly />
-                  {showCal && <CalendarPicker value={inputDate} onChange={function(v) { setInputDate(v); }} onClose={function() { setShowCal(false); }} t={t} />}
-                </div>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={lbl}>TIME</label>
-                  <input type="text" value={inputTime} onChange={function(e) { setInputTime(e.target.value); }} onKeyDown={handleKeyDown} placeholder="5:00pm" style={inp} />
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={lbl}>CATEGORY</label>
-                  <select value={inputCat} onChange={function(e) { setInputCat(e.target.value); }} style={sel}>{CATEGORIES.map(function(c) { return <option key={c.key} value={c.key}>{c.label}</option>; })}</select>
-                </div>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={lbl}>REMINDER</label>
-                  <select value={inputReminder} onChange={function(e) { setInputReminder(e.target.value); }} style={sel}>{REMINDERS.map(function(r) { return <option key={r.key} value={r.key}>{r.label}</option>; })}</select>
-                </div>
-              </div>
-              {showMoreFields && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <label style={lbl}>NOTES</label>
-                  <textarea value={inputNotes} onChange={function(e) { setInputNotes(e.target.value); }} placeholder="Add details..." style={Object.assign({}, inp, { fontSize: 14, resize: "vertical" })} rows={2} />
-                </div>
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={function() { setShowMoreFields(!showMoreFields); }} style={{ padding: "12px 16px", fontSize: 13, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", background: t.toggleBg, color: t.textMuted, border: "none", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" }}>{showMoreFields ? "Less" : "+ Notes"}</button>
-                <button onClick={addAppointment} style={{ flex: 1, padding: "12px 24px", fontSize: 15, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer" }}>Add</button>
-              </div>
-              {conflict && <div style={{ background: t.conflictBg, border: "1px solid " + t.conflictBorder, borderRadius: 10, padding: "10px 14px", fontSize: 13, color: t.conflictText, fontWeight: 500 }}>{"\u26A0\uFE0F Possible conflict with \"" + conflict.title + "\" at " + conflict.time}</div>}
-            </div>
-
-            <TimelineGraph appointments={appointments} t={t} />
-            <MonthCalendar appointments={appointments} t={t} onEdit={startEdit} onDelete={removeAppointment} />
-
-            {/* Search */}
-            {appointments.length > 0 && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                <input type="text" value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search appointments..." style={Object.assign({}, inp, { flex: 1, background: t.searchBg })} />
-                <select value={filterCat} onChange={function(e) { setFilterCat(e.target.value); }} style={Object.assign({}, sel, { flex: "none", width: "auto" })}>
-                  <option value="all">All categories</option>
-                  {CATEGORIES.map(function(c) { return <option key={c.key} value={c.key}>{c.label}</option>; })}
-                </select>
-              </div>
-            )}
-
-            {/* Table */}
-            {filtered.length > 0 ? (
-              <div style={{ background: t.card, borderRadius: 16, boxShadow: t.shadow, overflow: "hidden" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid " + t.borderLight, flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#3b82f6", background: t.badgeBg, padding: "4px 12px", borderRadius: 20 }}>{filtered.length + " appointment" + (filtered.length !== 1 ? "s" : "")}</span>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <button onClick={exportICS} style={{ fontSize: 12, fontWeight: 600, color: "#8b5cf6", background: t.icsBtn, border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>.ics</button>
-                    <button onClick={exportCSV} style={{ fontSize: 12, fontWeight: 600, color: "#10b981", background: t.csvBtn, border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", display: "flex", alignItems: "center", gap: 4 }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>CSV</button>
-                    <button onClick={clearAll} style={{ fontSize: 12, color: t.textFaint, background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>Clear all</button>
-                  </div>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead><tr>
-                      <th style={thStyle}>Appointment</th>
-                      <th style={thStyle}>Date</th>
-                      <th style={thStyle}>Time</th>
-                      <th style={thStyle}>Info</th>
-                      <th style={Object.assign({}, thStyle, { textAlign: "center" })}>Actions</th>
-                    </tr></thead>
-                    <tbody>
-                      {getTableRows().map(function(appt, i) {
-                        if (editingId === appt.id) {
-                          return (
-                            <tr key={appt.id} style={{ borderBottom: "1px solid " + t.borderLight }}><td colSpan="5" style={{ padding: "12px 16px" }}>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                <div style={{ display: "flex", gap: 10 }}><div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}><label style={lbl}>APPOINTMENT</label><input type="text" value={editName} onChange={function(e) { setEditName(e.target.value); }} onKeyDown={function(e) { handleEditKeyDown(e, appt.id); }} style={edt} autoFocus /></div></div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, position: "relative" }}><label style={lbl}>DATE</label><input type="text" value={editDate} onChange={function(e) { setEditDate(e.target.value); }} onFocus={function() { setShowEditCal(true); }} onKeyDown={function(e) { handleEditKeyDown(e, appt.id); }} style={edt} readOnly />{showEditCal && <CalendarPicker value={editDate} onChange={function(v) { setEditDate(v); }} onClose={function() { setShowEditCal(false); }} t={t} />}</div>
-                                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}><label style={lbl}>TIME</label><input type="text" value={editTime} onChange={function(e) { setEditTime(e.target.value); }} onKeyDown={function(e) { handleEditKeyDown(e, appt.id); }} style={edt} /></div>
-                                </div>
-                                <div style={{ display: "flex", gap: 10 }}>
-                                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}><label style={lbl}>CATEGORY</label><select value={editCat} onChange={function(e) { setEditCat(e.target.value); }} style={edt}>{CATEGORIES.map(function(c) { return <option key={c.key} value={c.key}>{c.label}</option>; })}</select></div>
-                                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}><label style={lbl}>REMINDER</label><select value={editReminder} onChange={function(e) { setEditReminder(e.target.value); }} style={edt}>{REMINDERS.map(function(r) { return <option key={r.key} value={r.key}>{r.label}</option>; })}</select></div>
-                                </div>
-                                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}><label style={lbl}>NOTES</label><textarea value={editNotes} onChange={function(e) { setEditNotes(e.target.value); }} style={Object.assign({}, edt, { resize: "vertical" })} rows={2} /></div>
-                                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                                  <button onClick={function() { saveEdit(appt.id); }} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Save</button>
-                                  <button onClick={cancelEdit} style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, fontFamily: "'DM Sans', sans-serif", background: t.toggleBg, color: t.textMuted, border: "none", borderRadius: 8, cursor: "pointer" }}>Cancel</button>
-                                </div>
-                              </div>
-                            </td></tr>
-                          );
-                        }
-                        return (
-                          <tr key={appt.id} style={{ borderBottom: "1px solid " + t.borderLight, animation: flash && i === 0 ? "slideIn 0.4s ease" : "none" }}>
-                            <td style={{ padding: "12px 16px", fontSize: 13, color: t.textSec, verticalAlign: "middle" }}>
-                              <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: getCatColor(appt.category), marginRight: 8, verticalAlign: "middle" }}></span>{appt.title}
-                            </td>
-                            <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted, fontFamily: "'JetBrains Mono', monospace", verticalAlign: "middle" }}>{appt.date}</td>
-                            <td style={{ padding: "12px 16px", fontSize: 12, color: t.textMuted, fontFamily: "'JetBrains Mono', monospace", verticalAlign: "middle" }}>{appt.time}</td>
-                            <td style={{ padding: "12px 16px", verticalAlign: "middle" }}>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                {appt.notes && <span title={appt.notes} style={{ fontSize: 14 }}>{"\uD83D\uDCDD"}</span>}
-                                {appt.reminder && appt.reminder !== "none" && <span title={REMINDERS.find(function(r) { return r.key===appt.reminder; })?.label} style={{ fontSize: 14 }}>{"\uD83D\uDD14"}</span>}
-                              </div>
-                            </td>
-                            <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle" }}>
-                              <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                                <button onClick={function() { startEdit(appt); }} style={{ background: "none", border: "none", cursor: "pointer", color: t.textGhost, padding: 5, borderRadius: 6, display: "inline-flex" }} title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                                <button onClick={function() { removeAppointment(appt.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: t.textGhost, padding: 5, borderRadius: 6, display: "inline-flex" }} title="Remove"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {filtered.length > 3 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", borderTop: "1px solid " + t.borderLight }}>
-                    <span style={{ fontSize: 13, color: t.textFaint, fontWeight: 500 }}>{(filtered.length - 3) + " more appointment" + (filtered.length - 3 !== 1 ? "s" : "")}</span>
-                    <button onClick={exportCSV} style={{ fontSize: 13, fontWeight: 600, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>{"\u2192 Download CSV for full list"}</button>
-                  </div>
-                )}
-              </div>
-            ) : appointments.length > 0 ? (
-              <div style={{ background: t.card, borderRadius: 16, padding: "48px 20px", textAlign: "center", boxShadow: t.shadow }}>
-                <p style={{ fontSize: 16, fontWeight: 600, color: t.textFaint, marginTop: 16 }}>No matching appointments</p>
-                <p style={{ fontSize: 14, color: t.textGhost, marginTop: 6 }}>Try a different search or filter</p>
-              </div>
-            ) : (
-              <div style={{ background: t.card, borderRadius: 16, padding: "48px 20px", textAlign: "center", boxShadow: t.shadow }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={t.textGhost} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
-                <p style={{ fontSize: 16, fontWeight: 600, color: t.textFaint, marginTop: 16 }}>No appointments yet</p>
-                <p style={{ fontSize: 14, color: t.textGhost, marginTop: 6 }}>Add one above to get started</p>
-              </div>
-            )}
-
-            <AppointmentChart key={appointments.map(function(a) { return a.id; }).join("-")} appointments={appointments} t={t} />
-
-            {/* Footer */}
-            <div style={{ textAlign: "center", padding: "32px 0 16px", fontSize: 12, color: t.textFaint }}>
-              <span>Your appointments are stored locally in your browser. No data is sent to any server.</span>
-              <div style={{ marginTop: 8 }}>
-                <a href="https://exilir.net" target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6", textDecoration: "none", fontWeight: 600 }}>Exilir LLC</a>
-                <span style={{ margin: "0 8px" }}>{"\u00B7"}</span>
-                <a href="https://exilir.net/classify" target="_blank" rel="noopener noreferrer" style={{ color: "#8b5cf6", textDecoration: "none", fontWeight: 600 }}>Try Exilir Classify</a>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    ReactDOM.createRoot(document.getElementById("root")).render(<CalendarApp />);
+ReactDOM.createRoot(document.getElementById("root")).render(<CalendarApp/>);
   </script>
 </body>
 </html>
+
